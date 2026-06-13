@@ -11,8 +11,9 @@ router.get('/*', async (c) => {
   const url = new URL(c.req.url);
   const key = url.pathname.replace(/^\/api\/logos\//, '');
 
-  // Only serve logo and launcher files — never documents
-  if (!/^tenants\/[^/]+\/bots\/[^/]+\/(logo|launcher)\.[a-z]+$/.test(key)) {
+  // Allow logo, launcher, bot-avatar (per bot) and system avatar presets
+  const allowed = /^(tenants\/[^/]+\/bots\/[^/]+\/(logo|launcher|bot-avatar)\.[a-z]+|system\/avatars\/[^/]+\.[a-z]+)$/;
+  if (!allowed.test(key)) {
     return c.json({ error: 'Not found' }, 404);
   }
 
@@ -22,7 +23,7 @@ router.get('/*', async (c) => {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=86400',
+        'Cache-Control': 'public, max-age=0, must-revalidate',
         'Access-Control-Allow-Origin': '*',
       },
     });

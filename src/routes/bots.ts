@@ -54,6 +54,7 @@ const createBotSchema = z.object({
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
   displayName: z.string().max(100).nullable().optional(),
   headerLogoBg: z.string().nullable().optional(),
+  botAvatarBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
 });
 
@@ -98,6 +99,7 @@ const updateBotSchema = z.object({
   launcherTransparent: z.boolean().optional(),
   botAvatarUrl: z.string().url().nullable().optional(),
   headerLogoBg: z.string().nullable().optional(),
+  botAvatarBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
 });
 
