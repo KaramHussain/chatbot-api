@@ -8,6 +8,13 @@
       "when": 1781214226781,
       "tag": "0000_greedy_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1749772800000,
+      "tag": "0001_add_missing_columns",
+      "breakpoints": true
     }
   ]
 }
