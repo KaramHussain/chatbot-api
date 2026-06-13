@@ -7,6 +7,7 @@ import type { HonoEnv } from '../../types/index.js';
 const router = new Hono<HonoEnv>();
 
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL ?? 'http://localhost:3001';
+const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB ?? '10', 10) * 1024 * 1024;
 
 const VALID_IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -31,7 +32,7 @@ router.post('/', async (c) => {
   if (!ext) return c.json({ error: 'Invalid image type. Use PNG, JPG, WEBP, or SVG.' }, 400);
 
   const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > 2 * 1024 * 1024) return c.json({ error: 'File too large (max 2 MB)' }, 413);
+  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
   const name = c.req.header('x-preset-name') ?? 'Avatar';
   const id = crypto.randomUUID();

@@ -22,6 +22,13 @@
       "when": 1749859200000,
       "tag": "0002_bot_theme_and_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1749945600000,
+      "tag": "0003_custom_themes",
+      "breakpoints": true
     }
   ]
 }

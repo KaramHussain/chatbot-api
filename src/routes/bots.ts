@@ -53,6 +53,8 @@ const createBotSchema = z.object({
   botAvatarUrl: z.string().url().nullable().optional(),
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
   displayName: z.string().max(100).nullable().optional(),
+  headerLogoBg: z.string().nullable().optional(),
+  tenantThemeId: z.string().uuid().nullable().optional(),
 });
 
 router.post('/', zValidator('json', createBotSchema), async (c) => {
@@ -95,6 +97,8 @@ const updateBotSchema = z.object({
   widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
   launcherTransparent: z.boolean().optional(),
   botAvatarUrl: z.string().url().nullable().optional(),
+  headerLogoBg: z.string().nullable().optional(),
+  tenantThemeId: z.string().uuid().nullable().optional(),
 });
 
 router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
@@ -134,6 +138,7 @@ const VALID_IMAGE_TYPES: Record<string, string> = {
 };
 
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL ?? 'http://localhost:3001';
+const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB ?? '10', 10) * 1024 * 1024;
 
 // POST /api/bots/:id/logo — upload chat header logo directly
 router.post('/:id/logo', async (c) => {
@@ -148,7 +153,7 @@ router.post('/:id/logo', async (c) => {
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
   const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > 2 * 1024 * 1024) return c.json({ error: 'File too large (max 2 MB)' }, 413);
+  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
   const s3Key = buildLogoKey(tenantId, id, ext);
   await putObject(s3Key, buffer, contentType);
@@ -172,7 +177,7 @@ router.post('/:id/bot-avatar', async (c) => {
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
   const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > 2 * 1024 * 1024) return c.json({ error: 'File too large (max 2 MB)' }, 413);
+  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
   const s3Key = `tenants/${tenantId}/bots/${id}/bot-avatar.${ext}`;
   await putObject(s3Key, buffer, contentType);
@@ -196,7 +201,7 @@ router.post('/:id/launcher-logo', async (c) => {
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
   const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > 2 * 1024 * 1024) return c.json({ error: 'File too large (max 2 MB)' }, 413);
+  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
   const s3Key = `tenants/${tenantId}/bots/${id}/launcher.${ext}`;
   await putObject(s3Key, buffer, contentType);

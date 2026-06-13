@@ -115,6 +115,8 @@ export const bots = pgTable('bots', {
   launcherSize: integer('launcher_size').default(3).notNull(),
   widgetPosition: text('widget_position').default('bottom-right'),
   launcherTransparent: boolean('launcher_transparent').default(false).notNull(),
+  headerLogoBg: text('header_logo_bg'),   // null=default white tint, 'transparent', or '#hex'
+  tenantThemeId: uuid('tenant_theme_id'),  // FK set after tenantThemes table is defined
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -220,6 +222,25 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   tokenIdx: index('prt_token_idx').on(t.token),
 }));
 
+// ─── Tenant Custom Themes ─────────────────────────────────────────────────────
+export const tenantThemes = pgTable('tenant_themes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  primaryColor: text('primary_color').notNull().default('#7c3aed'),
+  userBubbleColor: text('user_bubble_color').notNull().default('#6d28d9'),
+  botBubbleBg: text('bot_bubble_bg').notNull().default('#f5f3ff'),
+  botTextColor: text('bot_text_color').notNull().default('#2e1065'),
+  windowBg: text('window_bg').notNull().default('#ffffff'),
+  inputBg: text('input_bg').notNull().default('#f8fafc'),
+  headerLogoBg: text('header_logo_bg'),   // null=default, 'transparent', or '#hex'
+  userText: text('user_text').notNull().default('#ffffff'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  tenantIdx: index('tenant_themes_tenant_idx').on(t.tenantId),
+}));
+
 // ─── Bot Avatar Presets (admin-managed, selectable by all users) ──────────────
 export const botAvatarPresets = pgTable('bot_avatar_presets', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -242,8 +263,13 @@ export const usersRelations = relations(users, ({ one }) => ({
   tenant: one(tenants, { fields: [users.tenantId], references: [tenants.id] }),
 }));
 
+export const tenantThemesRelations = relations(tenantThemes, ({ one }) => ({
+  tenant: one(tenants, { fields: [tenantThemes.tenantId], references: [tenants.id] }),
+}));
+
 export const botsRelations = relations(bots, ({ one, many }) => ({
   tenant: one(tenants, { fields: [bots.tenantId], references: [tenants.id] }),
+  tenantTheme: one(tenantThemes, { fields: [bots.tenantThemeId], references: [tenantThemes.id] }),
   documents: many(botDocuments),
   conversations: many(conversations),
 }));

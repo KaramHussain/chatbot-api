@@ -11,6 +11,7 @@ import chatRouter from './chat.js';
 import widgetRouter from './widget.js';
 import accountRouter from './account.js';
 import logosRouter from './logos.js';
+import tenantThemesRouter from './tenant-themes.js';
 import type { HonoEnv } from '../types/index.js';
 
 const api = new Hono<HonoEnv>();
@@ -37,9 +38,11 @@ protected_
 protected_
   .use('/bots/*', requireTenant)
   .use('/documents/*', requireTenant)
+  .use('/themes/*', requireTenant)
   .route('/bots', botsRouter)
   .route('/documents', documentsRouter)
-  .route('/account', accountRouter);
+  .route('/account', accountRouter)
+  .route('/themes', tenantThemesRouter);
 
 // Bot avatar presets — readable by any authenticated user (used in bot creation wizard)
 protected_.get('/bot-avatar-presets', async (c) => {

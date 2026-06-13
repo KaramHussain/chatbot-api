@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, bots, tenants } from '../db/index.js';
+import { db, bots, tenants, tenantThemes } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 
 const router = new Hono();
@@ -27,6 +27,8 @@ router.get('/:botId', async (c) => {
       launcherSize: bots.launcherSize,
       widgetPosition: bots.widgetPosition,
       launcherTransparent: bots.launcherTransparent,
+      headerLogoBg: bots.headerLogoBg,
+      tenantThemeId: bots.tenantThemeId,
       sessionDurationMinutes: tenants.sessionDurationMinutes,
     })
     .from(bots)
@@ -36,7 +38,31 @@ router.get('/:botId', async (c) => {
 
   if (!row) return c.json({ error: 'Bot not found' }, 404);
 
-  const { sessionDurationMinutes, ...config } = row;
+  const { sessionDurationMinutes, tenantThemeId, ...config } = row;
+
+  // If bot uses a custom tenant theme, resolve and inline all color values
+  if (tenantThemeId) {
+    const [customTheme] = await db
+      .select()
+      .from(tenantThemes)
+      .where(eq(tenantThemes.id, tenantThemeId))
+      .limit(1);
+
+    if (customTheme) {
+      Object.assign(config, {
+        themeName: 'Custom',
+        primaryColor: customTheme.primaryColor,
+        userBubbleColor: customTheme.userBubbleColor,
+        botBubbleBg: customTheme.botBubbleBg,
+        botTextColor: customTheme.botTextColor,
+        windowBg: customTheme.windowBg,
+        inputBg: customTheme.inputBg,
+        userText: customTheme.userText,
+        headerLogoBg: customTheme.headerLogoBg ?? config.headerLogoBg,
+      });
+    }
+  }
+
   return c.json({ config, sessionDurationMinutes });
 });
 
