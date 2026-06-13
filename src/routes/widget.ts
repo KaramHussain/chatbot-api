@@ -21,6 +21,12 @@ router.get('/:botId', async (c) => {
       leadCaptureEnabled: bots.leadCaptureEnabled,
       leadCaptureMessage: bots.leadCaptureMessage,
       status: bots.status,
+      themeName: bots.themeName,
+      userBubbleColor: bots.userBubbleColor,
+      botBubbleBg: bots.botBubbleBg,
+      launcherSize: bots.launcherSize,
+      widgetPosition: bots.widgetPosition,
+      launcherTransparent: bots.launcherTransparent,
       sessionDurationMinutes: tenants.sessionDurationMinutes,
     })
     .from(bots)

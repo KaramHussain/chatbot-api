@@ -108,6 +108,13 @@ export const bots = pgTable('bots', {
   displayName: text('display_name'),
   // Custom launcher button image URL (the floating chat button)
   launcherLogoUrl: text('launcher_logo_url'),
+  // Widget theme & appearance
+  themeName: text('theme_name').default('Amethyst'),
+  userBubbleColor: text('user_bubble_color'),
+  botBubbleBg: text('bot_bubble_bg'),
+  launcherSize: integer('launcher_size').default(3).notNull(),
+  widgetPosition: text('widget_position').default('bottom-right'),
+  launcherTransparent: boolean('launcher_transparent').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -211,6 +218,18 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => ({
   tokenIdx: index('prt_token_idx').on(t.token),
+}));
+
+// ─── Bot Avatar Presets (admin-managed, selectable by all users) ──────────────
+export const botAvatarPresets = pgTable('bot_avatar_presets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  imageUrl: text('image_url').notNull(),
+  isDefault: boolean('is_default').default(false).notNull(),
+  displayOrder: integer('display_order').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  displayOrderIdx: index('bot_avatar_presets_order_idx').on(t.displayOrder),
 }));
 
 // ─── Relations ─────────────────────────────────────────────────────────────────

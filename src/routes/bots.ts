@@ -44,6 +44,15 @@ const createBotSchema = z.object({
   allowedOrigins: z.array(z.string().url()).default([]),
   leadCaptureEnabled: z.boolean().default(false),
   leadCaptureMessage: z.string().max(300).optional(),
+  themeName: z.string().max(50).optional(),
+  userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
+  botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
+  launcherSize: z.number().int().min(1).max(6).optional(),
+  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+  launcherTransparent: z.boolean().optional(),
+  botAvatarUrl: z.string().url().nullable().optional(),
+  responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
+  displayName: z.string().max(100).nullable().optional(),
 });
 
 router.post('/', zValidator('json', createBotSchema), async (c) => {
@@ -79,6 +88,13 @@ const updateBotSchema = z.object({
   leadCaptureMessage: z.string().max(300).optional(),
   llmModel: z.string().optional(),
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
+  themeName: z.string().max(50).optional(),
+  userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
+  botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
+  launcherSize: z.number().int().min(1).max(6).optional(),
+  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+  launcherTransparent: z.boolean().optional(),
+  botAvatarUrl: z.string().url().nullable().optional(),
 });
 
 router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
@@ -141,6 +157,30 @@ router.post('/:id/logo', async (c) => {
   await db.update(bots).set({ logoUrl, updatedAt: new Date() }).where(eq(bots.id, id));
 
   return c.json({ logoUrl });
+});
+
+// POST /api/bots/:id/bot-avatar — upload the small avatar shown beside each AI message
+router.post('/:id/bot-avatar', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+  const contentType = c.req.header('content-type')?.split(';')[0].trim() ?? '';
+  const ext = VALID_IMAGE_TYPES[contentType];
+  if (!ext) return c.json({ error: 'Invalid image type. Use PNG, JPG, WEBP, or SVG.' }, 400);
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  const buffer = Buffer.from(await c.req.arrayBuffer());
+  if (buffer.length > 2 * 1024 * 1024) return c.json({ error: 'File too large (max 2 MB)' }, 413);
+
+  const s3Key = `tenants/${tenantId}/bots/${id}/bot-avatar.${ext}`;
+  await putObject(s3Key, buffer, contentType);
+
+  const botAvatarUrl = `${API_PUBLIC_URL}/api/logos/${s3Key}`;
+  await db.update(bots).set({ botAvatarUrl, updatedAt: new Date() }).where(eq(bots.id, id));
+
+  return c.json({ botAvatarUrl });
 });
 
 // POST /api/bots/:id/launcher-logo — upload launcher button logo directly

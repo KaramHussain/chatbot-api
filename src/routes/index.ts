@@ -4,6 +4,7 @@ import authRouter from './auth.js';
 import registerRouter from './register.js';
 import adminTenantsRouter from './admin/tenants.js';
 import adminAnalyticsRouter from './admin/analytics.js';
+import adminBotAvatarsRouter from './admin/bot-avatars.js';
 import botsRouter from './bots.js';
 import documentsRouter from './documents.js';
 import chatRouter from './chat.js';
@@ -29,15 +30,27 @@ protected_.use('*', authMiddleware);
 protected_
   .use('/admin/*', requireSuperAdmin)
   .route('/admin/tenants', adminTenantsRouter)
-  .route('/admin/analytics', adminAnalyticsRouter);
+  .route('/admin/analytics', adminAnalyticsRouter)
+  .route('/admin/bot-avatars', adminBotAvatarsRouter);
 
-// Client-tenant routes
+// Client-tenant routes (bots, documents, account)
 protected_
   .use('/bots/*', requireTenant)
   .use('/documents/*', requireTenant)
   .route('/bots', botsRouter)
   .route('/documents', documentsRouter)
   .route('/account', accountRouter);
+
+// Bot avatar presets — readable by any authenticated user (used in bot creation wizard)
+protected_.get('/bot-avatar-presets', async (c) => {
+  const { db, botAvatarPresets } = await import('../db/index.js');
+  const { asc } = await import('drizzle-orm');
+  const presets = await db
+    .select()
+    .from(botAvatarPresets)
+    .orderBy(asc(botAvatarPresets.displayOrder), asc(botAvatarPresets.createdAt));
+  return c.json({ presets });
+});
 
 api.route('/', protected_);
 

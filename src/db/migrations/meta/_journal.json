@@ -15,6 +15,13 @@
       "when": 1749772800000,
       "tag": "0001_add_missing_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1749859200000,
+      "tag": "0002_bot_theme_and_avatars",
+      "breakpoints": true
     }
   ]
 }
