@@ -12,22 +12,10 @@ const app = new Hono();
 app.use(
   '*',
   cors({
-    origin: (origin, c) => {
-      // Widget and chat endpoints are embedded on third-party sites — allow any origin.
-      const path = c.req.path;
-      if (path.startsWith('/api/widget-config/') || path.startsWith('/api/chat/')) {
-        return origin;
-      }
-      // In development, allow all.
-      if (process.env.NODE_ENV !== 'production') return origin;
-      // Dashboard / admin endpoints — restrict to known origins.
-      const allowed = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim());
-      return allowed.includes(origin) ? origin : null;
-    },
+    origin: '*',
     allowHeaders: ['Content-Type', 'Authorization', 'x-preset-name'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Length'],
-    credentials: true,
   })
 );
 
