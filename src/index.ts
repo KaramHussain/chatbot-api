@@ -12,10 +12,15 @@ const app = new Hono();
 app.use(
   '*',
   cors({
-    origin: (origin) => {
-      // In development, allow all. In production, lock to specific origins.
+    origin: (origin, c) => {
+      // Widget and chat endpoints are embedded on third-party sites — allow any origin.
+      const path = c.req.path;
+      if (path.startsWith('/api/widget-config/') || path.startsWith('/api/chat/')) {
+        return origin;
+      }
+      // In development, allow all.
       if (process.env.NODE_ENV !== 'production') return origin;
-      // Dashboard origin — set this in env
+      // Dashboard / admin endpoints — restrict to known origins.
       const allowed = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim());
       return allowed.includes(origin) ? origin : null;
     },
