@@ -24,7 +24,7 @@ app.use(
       const allowed = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim());
       return allowed.includes(origin) ? origin : null;
     },
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'x-preset-name'],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Length'],
     credentials: true,
