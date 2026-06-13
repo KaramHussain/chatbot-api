@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db, bots } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
+import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
 
 const router = new Hono<HonoEnv>();
@@ -144,6 +145,15 @@ const VALID_IMAGE_TYPES: Record<string, string> = {
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL ?? 'http://localhost:3001';
 const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB ?? '10', 10) * 1024 * 1024;
 
+async function resizeImage(buffer: Buffer, contentType: string, maxWidth: number, maxHeight: number): Promise<{ buffer: Buffer; contentType: string; ext: string }> {
+  if (contentType === 'image/svg+xml') return { buffer, contentType, ext: 'svg' };
+  const resized = await sharp(buffer)
+    .resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 82 })
+    .toBuffer();
+  return { buffer: resized, contentType: 'image/webp', ext: 'webp' };
+}
+
 // POST /api/bots/:id/logo — upload chat header logo directly
 router.post('/:id/logo', async (c) => {
   const tenantId = c.get('tenantId');
@@ -156,11 +166,12 @@ router.post('/:id/logo', async (c) => {
     .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
-  const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
+  const raw = Buffer.from(await c.req.arrayBuffer());
+  if (raw.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
-  const s3Key = buildLogoKey(tenantId, id, ext);
-  await putObject(s3Key, buffer, contentType);
+  const { buffer, contentType: outType, ext: outExt } = await resizeImage(raw, contentType, 800, 400);
+  const s3Key = buildLogoKey(tenantId, id, outExt);
+  await putObject(s3Key, buffer, outType);
 
   const logoUrl = `${API_PUBLIC_URL}/api/logos/${s3Key}`;
   await db.update(bots).set({ logoUrl, updatedAt: new Date() }).where(eq(bots.id, id));
@@ -180,11 +191,12 @@ router.post('/:id/bot-avatar', async (c) => {
     .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
-  const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
+  const raw = Buffer.from(await c.req.arrayBuffer());
+  if (raw.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
-  const s3Key = `tenants/${tenantId}/bots/${id}/bot-avatar.${ext}`;
-  await putObject(s3Key, buffer, contentType);
+  const { buffer, contentType: outType, ext: outExt } = await resizeImage(raw, contentType, 400, 400);
+  const s3Key = `tenants/${tenantId}/bots/${id}/bot-avatar.${outExt}`;
+  await putObject(s3Key, buffer, outType);
 
   const botAvatarUrl = `${API_PUBLIC_URL}/api/logos/${s3Key}`;
   await db.update(bots).set({ botAvatarUrl, updatedAt: new Date() }).where(eq(bots.id, id));
@@ -204,11 +216,12 @@ router.post('/:id/launcher-logo', async (c) => {
     .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
-  const buffer = Buffer.from(await c.req.arrayBuffer());
-  if (buffer.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
+  const raw = Buffer.from(await c.req.arrayBuffer());
+  if (raw.length > MAX_UPLOAD_BYTES) return c.json({ error: `File too large (max ${process.env.MAX_UPLOAD_MB ?? '10'} MB)` }, 413);
 
-  const s3Key = `tenants/${tenantId}/bots/${id}/launcher.${ext}`;
-  await putObject(s3Key, buffer, contentType);
+  const { buffer, contentType: outType, ext: outExt } = await resizeImage(raw, contentType, 400, 400);
+  const s3Key = `tenants/${tenantId}/bots/${id}/launcher.${outExt}`;
+  await putObject(s3Key, buffer, outType);
 
   const launcherLogoUrl = `${API_PUBLIC_URL}/api/logos/${s3Key}`;
   await db.update(bots).set({ launcherLogoUrl, updatedAt: new Date() }).where(eq(bots.id, id));
