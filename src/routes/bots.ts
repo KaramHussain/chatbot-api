@@ -40,7 +40,7 @@ const createBotSchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   welcomeMessage: z.string().max(500).optional(),
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-  systemPrompt: z.string().max(2000).optional(),
+  systemPrompt: z.string().max(2000).nullable().optional(),
   allowedOrigins: z.array(z.string().url()).default([]),
   leadCaptureEnabled: z.boolean().default(false),
   leadCaptureMessage: z.string().max(300).optional(),
