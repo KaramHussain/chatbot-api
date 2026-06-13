@@ -55,6 +55,7 @@ const createBotSchema = z.object({
   displayName: z.string().max(100).nullable().optional(),
   headerLogoBg: z.string().nullable().optional(),
   botAvatarBg: z.string().nullable().optional(),
+  launcherBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
 });
 
@@ -100,6 +101,7 @@ const updateBotSchema = z.object({
   botAvatarUrl: z.string().url().nullable().optional(),
   headerLogoBg: z.string().nullable().optional(),
   botAvatarBg: z.string().nullable().optional(),
+  launcherBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
 });
 

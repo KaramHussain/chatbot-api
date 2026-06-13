@@ -29,6 +29,7 @@ router.get('/:botId', async (c) => {
       launcherTransparent: bots.launcherTransparent,
       headerLogoBg: bots.headerLogoBg,
       botAvatarBg: bots.botAvatarBg,
+      launcherBg: bots.launcherBg,
       tenantThemeId: bots.tenantThemeId,
       sessionDurationMinutes: tenants.sessionDurationMinutes,
     })
