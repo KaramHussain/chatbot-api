@@ -235,7 +235,8 @@ export const tenantThemes = pgTable('tenant_themes', {
   botTextColor: text('bot_text_color').notNull().default('#2e1065'),
   windowBg: text('window_bg').notNull().default('#ffffff'),
   inputBg: text('input_bg').notNull().default('#f8fafc'),
-  headerLogoBg: text('header_logo_bg'),   // null=default, 'transparent', or '#hex'
+  headerLogoBg: text('header_logo_bg'),      // null=default, 'transparent', or '#hex'
+  headerTextColor: text('header_text_color'), // null=auto-contrast, or '#hex'
   userText: text('user_text').notNull().default('#ffffff'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -61,6 +61,7 @@ router.get('/:botId', async (c) => {
         inputBg: customTheme.inputBg,
         userText: customTheme.userText,
         headerLogoBg: customTheme.headerLogoBg ?? config.headerLogoBg,
+        headerTextColor: customTheme.headerTextColor ?? null,
       });
     }
   }
