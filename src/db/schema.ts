@@ -119,6 +119,7 @@ export const bots = pgTable('bots', {
   botAvatarBg: text('bot_avatar_bg'),      // null=primary color, 'transparent', or '#hex'
   launcherBg: text('launcher_bg'),         // null=primary color, 'transparent', or '#hex'
   tenantThemeId: uuid('tenant_theme_id'),  // FK set after tenantThemes table is defined
+  headerSubtext: text('header_subtext'),   // optional subtitle shown below bot name in header
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
