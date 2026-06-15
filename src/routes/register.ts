@@ -19,7 +19,7 @@ const mailer = nodemailer.createTransport({
   },
 });
 
-const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'https://chat.cloudgeniee.com';
 
 // POST /api/auth/register/start — step 1: validate email and send verification link
 router.post('/start', zValidator('json', z.object({ email: z.string().email() })), async (c) => {
