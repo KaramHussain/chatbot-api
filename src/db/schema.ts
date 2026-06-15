@@ -58,6 +58,7 @@ export const tenants = pgTable('tenants', {
   tokensUsedThisMonth: integer('tokens_used_this_month').default(0).notNull(),
   tokenBudgetResetAt: timestamp('token_budget_reset_at'),
   sessionDurationMinutes: integer('session_duration_minutes').default(1440).notNull(),
+  maxUploadMb: integer('max_upload_mb'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

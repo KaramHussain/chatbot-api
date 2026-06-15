@@ -95,6 +95,7 @@ const updateTenantSchema = z.object({
   aiModel: z.string().optional(),
   monthlyTokenBudget: z.number().int().min(0).optional(),
   sessionDurationMinutes: z.number().int().min(1).max(43200).optional(),
+  maxUploadMb: z.number().int().min(1).max(500).nullable().optional(),
 });
 
 router.put('/:id', zValidator('json', updateTenantSchema), async (c) => {

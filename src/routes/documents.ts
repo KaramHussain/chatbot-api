@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, botDocuments, botChunks, bots } from '../db/index.js';
+import { db, botDocuments, botChunks, bots, tenants } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { getPresignedUploadUrl, deleteObject, buildDocumentKey } from '../lib/s3.js';
 import { queueIngestionJob } from '../lib/sqs.js';
@@ -34,6 +34,8 @@ router.get('/', async (c) => {
   return c.json({ documents: docs });
 });
 
+const GLOBAL_DEFAULT_MAX_MB = parseInt(process.env.MAX_UPLOAD_MB ?? '100', 10);
+
 // POST /api/documents/upload-url — Step 1: get presigned S3 URL
 const uploadUrlSchema = z.object({
   botId: z.string().uuid(),
@@ -43,12 +45,26 @@ const uploadUrlSchema = z.object({
     'text/plain',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   ]),
-  fileSizeBytes: z.number().int().positive().max(50 * 1024 * 1024), // 50 MB max
+  fileSizeBytes: z.number().int().positive().max(500 * 1024 * 1024), // hard cap 500 MB
 });
 
 router.post('/upload-url', zValidator('json', uploadUrlSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const body = c.req.valid('json');
+
+  // Fetch tenant to get per-tenant upload limit
+  const [tenant] = await db
+    .select({ maxUploadMb: tenants.maxUploadMb })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+
+  const effectiveMaxMb = tenant?.maxUploadMb ?? GLOBAL_DEFAULT_MAX_MB;
+  const effectiveMaxBytes = effectiveMaxMb * 1024 * 1024;
+
+  if (body.fileSizeBytes > effectiveMaxBytes) {
+    return c.json({ error: `File too large. Maximum allowed for your account is ${effectiveMaxMb} MB.` }, 413);
+  }
 
   // Verify bot belongs to tenant
   const [bot] = await db
