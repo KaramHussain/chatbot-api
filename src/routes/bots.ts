@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, bots } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { db, bots, botChunks } from '../db/index.js';
+import { eq, and, count } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
 import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
@@ -13,7 +13,16 @@ const router = new Hono<HonoEnv>();
 router.get('/', async (c) => {
   const tenantId = c.get('tenantId');
   const rows = await db.select().from(bots).where(eq(bots.tenantId, tenantId));
-  return c.json({ bots: rows });
+  if (rows.length === 0) return c.json({ bots: [] });
+
+  const chunkCounts = await db
+    .select({ botId: botChunks.botId, total: count(botChunks.id) })
+    .from(botChunks)
+    .where(eq(botChunks.tenantId, tenantId))
+    .groupBy(botChunks.botId);
+
+  const countMap = new Map(chunkCounts.map(r => [r.botId, Number(r.total)]));
+  return c.json({ bots: rows.map(b => ({ ...b, chunkCount: countMap.get(b.id) ?? 0 })) });
 });
 
 // GET /api/bots/:id
