@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, tenants, users } from '../../db/index.js';
-import { eq, desc, sql } from 'drizzle-orm';
+import { db, tenants, users, botChunks, botDocuments, conversations } from '../../db/index.js';
+import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import type { HonoEnv } from '../../types/index.js';
 
@@ -119,9 +119,9 @@ router.delete('/:id/data', async (c) => {
   const [tenant] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
   if (!tenant) return c.json({ error: 'Not found' }, 404);
 
-  await db.execute(sql`DELETE FROM bot_chunks WHERE tenant_id = ${id}`);
-  await db.execute(sql`DELETE FROM bot_documents WHERE tenant_id = ${id}`);
-  await db.execute(sql`DELETE FROM conversations WHERE tenant_id = ${id}`);
+  await db.delete(botChunks).where(eq(botChunks.tenantId, id));
+  await db.delete(botDocuments).where(eq(botDocuments.tenantId, id));
+  await db.delete(conversations).where(eq(conversations.tenantId, id));
 
   await db.update(tenants).set({ tokensUsedThisMonth: 0, messagesThisMonth: 0, updatedAt: new Date() }).where(eq(tenants.id, id));
 
