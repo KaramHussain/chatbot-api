@@ -123,8 +123,6 @@ router.delete('/:id/data', async (c) => {
   await db.delete(botDocuments).where(eq(botDocuments.tenantId, id));
   await db.delete(conversations).where(eq(conversations.tenantId, id));
 
-  await db.update(tenants).set({ tokensUsedThisMonth: 0, messagesThisMonth: 0, updatedAt: new Date() }).where(eq(tenants.id, id));
-
   return c.json({ success: true });
 });
 
