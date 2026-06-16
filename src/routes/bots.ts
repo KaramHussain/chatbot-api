@@ -59,6 +59,8 @@ const createBotSchema = z.object({
   launcherBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
   headerSubtext: z.string().max(120).nullable().optional(),
+  headerNameColor: z.string().nullable().optional(),
+  headerBg: z.string().nullable().optional(),
 });
 
 router.post('/', zValidator('json', createBotSchema), async (c) => {
@@ -106,6 +108,8 @@ const updateBotSchema = z.object({
   launcherBg: z.string().nullable().optional(),
   tenantThemeId: z.string().uuid().nullable().optional(),
   headerSubtext: z.string().max(120).nullable().optional(),
+  headerNameColor: z.string().nullable().optional(),
+  headerBg: z.string().nullable().optional(),
 });
 
 router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
