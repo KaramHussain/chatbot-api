@@ -69,6 +69,7 @@ router.get('/:botId', async (c) => {
     }
   }
 
+  c.header('Cache-Control', 'no-store, max-age=0');
   return c.json({ config, sessionDurationMinutes });
 });
 
