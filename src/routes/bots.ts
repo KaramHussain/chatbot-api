@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, bots, botChunks } from '../db/index.js';
-import { eq, and, count } from 'drizzle-orm';
+import { db, bots, botChunks, conversations, messages } from '../db/index.js';
+import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
 import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
@@ -242,6 +242,86 @@ router.post('/:id/launcher-logo', async (c) => {
   await db.update(bots).set({ launcherLogoUrl, updatedAt: new Date() }).where(eq(bots.id, id));
 
   return c.json({ launcherLogoUrl });
+});
+
+// GET /api/bots/:id/conversations — list conversations for a bot (paginated, date-filtered)
+router.get('/:id/conversations', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10)));
+  const offset = (page - 1) * limit;
+
+  const toDate = to ? new Date(to) : undefined;
+  if (toDate) toDate.setHours(23, 59, 59, 999);
+
+  const where = and(
+    eq(conversations.botId, id),
+    eq(conversations.tenantId, tenantId),
+    from ? gte(conversations.startedAt, new Date(from)) : undefined,
+    toDate ? lte(conversations.startedAt, toDate) : undefined,
+  );
+
+  const [statsRow] = await db
+    .select({
+      totalConversations: count(conversations.id),
+      totalMessages: sql<number>`coalesce(sum(${conversations.messageCount}), 0)`,
+      uniqueVisitors: sql<number>`count(distinct ${conversations.visitorId})`,
+    })
+    .from(conversations)
+    .where(where);
+
+  const rows = await db
+    .select()
+    .from(conversations)
+    .where(where)
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(limit)
+    .offset(offset);
+
+  const total = Number(statsRow?.totalConversations ?? 0);
+
+  return c.json({
+    conversations: rows,
+    stats: {
+      totalConversations: total,
+      totalMessages: Number(statsRow?.totalMessages ?? 0),
+      uniqueVisitors: Number(statsRow?.uniqueVisitors ?? 0),
+    },
+    total,
+    page,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  });
+});
+
+// GET /api/bots/:id/conversations/:conversationId/messages
+router.get('/:id/conversations/:conversationId/messages', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id, conversationId } = c.req.param();
+
+  const [conv] = await db.select({ id: conversations.id })
+    .from(conversations)
+    .where(and(
+      eq(conversations.id, conversationId),
+      eq(conversations.botId, id),
+      eq(conversations.tenantId, tenantId),
+    ))
+    .limit(1);
+  if (!conv) return c.json({ error: 'Not found' }, 404);
+
+  const msgs = await db.select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(asc(messages.createdAt));
+
+  return c.json({ messages: msgs });
 });
 
 export default router;
