@@ -244,7 +244,7 @@ router.get('/:id/conversations', async (c) => {
         .select({
         totalConversations: count(conversations.id),
         totalMessages: sql `coalesce(sum(${conversations.messageCount}), 0)`,
-        uniqueVisitors: sql `count(distinct ${conversations.visitorId})`,
+        uniqueVisitors: sql `count(distinct coalesce(${conversations.visitorId}, ${conversations.id}::text))`,
         leadsCount: sql `count(case when ${conversations.visitorEmail} is not null then 1 end)`,
     })
         .from(conversations)
