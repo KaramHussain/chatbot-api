@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import { jwtVerify, SignJWT } from 'jose';
 const JWT_SECRET = new TextEncoder().encode(process.env.API_SECRET ?? 'change-this-to-a-long-random-string');
-export const JWT_EXPIRY = '7d';
+export const JWT_EXPIRY = '24h';
 // Create a signed JWT for a user (called on login)
 export async function signToken(payload) {
     return new SignJWT({ ...payload })

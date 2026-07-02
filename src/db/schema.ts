@@ -101,6 +101,7 @@ export const bots = pgTable('bots', {
   // Lead capture
   leadCaptureEnabled: boolean('lead_capture_enabled').default(false).notNull(),
   leadCaptureMessage: text('lead_capture_message').default('Leave your email and we\'ll follow up!'),
+  leadCaptureFields: jsonb('lead_capture_fields').default([]).notNull(),
   // LLM override (null = use global env default)
   llmModel: text('llm_model'),
   // Response style: balanced | concise | very_concise | detailed | bullet_points | professional | friendly
@@ -178,6 +179,8 @@ export const conversations = pgTable('conversations', {
   visitorId: text('visitor_id'),                    // anonymous browser fingerprint
   visitorEmail: text('visitor_email'),              // if lead capture
   visitorName: text('visitor_name'),
+  visitorPhone: text('visitor_phone'),
+  leadData: jsonb('lead_data').default({}).notNull(),
   messageCount: integer('message_count').default(0).notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
   lastMessageAt: timestamp('last_message_at').defaultNow().notNull(),

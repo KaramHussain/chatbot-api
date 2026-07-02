@@ -1,6 +1,5 @@
-import { S3Client, DeleteObjectCommand, GetObjectCommand, } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { awsConfig } from './aws.js';
 const s3 = new S3Client(awsConfig);
 const BUCKET = process.env.S3_BUCKET_NAME;
@@ -30,5 +29,17 @@ export function buildDocumentKey(params) {
 // S3 key for bot logos
 export function buildLogoKey(tenantId, botId, ext) {
     return `tenants/${tenantId}/bots/${botId}/logo.${ext}`;
+}
+// Upload a buffer directly to S3 (for server-side uploads)
+export async function putObject(key, body, contentType) {
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
+}
+// Get an S3 object and return its stream + content-type
+export async function getObjectStream(key) {
+    const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    return {
+        body: res.Body,
+        contentType: res.ContentType ?? 'application/octet-stream',
+    };
 }
 //# sourceMappingURL=s3.js.map

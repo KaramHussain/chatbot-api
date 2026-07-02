@@ -43,6 +43,7 @@ export const tenants = pgTable('tenants', {
     tokensUsedThisMonth: integer('tokens_used_this_month').default(0).notNull(),
     tokenBudgetResetAt: timestamp('token_budget_reset_at'),
     sessionDurationMinutes: integer('session_duration_minutes').default(1440).notNull(),
+    maxUploadMb: integer('max_upload_mb'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -83,6 +84,7 @@ export const bots = pgTable('bots', {
     // Lead capture
     leadCaptureEnabled: boolean('lead_capture_enabled').default(false).notNull(),
     leadCaptureMessage: text('lead_capture_message').default('Leave your email and we\'ll follow up!'),
+    leadCaptureFields: jsonb('lead_capture_fields').default([]).notNull(),
     // LLM override (null = use global env default)
     llmModel: text('llm_model'),
     // Response style: balanced | concise | very_concise | detailed | bullet_points | professional | friendly
@@ -91,6 +93,20 @@ export const bots = pgTable('bots', {
     displayName: text('display_name'),
     // Custom launcher button image URL (the floating chat button)
     launcherLogoUrl: text('launcher_logo_url'),
+    // Widget theme & appearance
+    themeName: text('theme_name').default('Amethyst'),
+    userBubbleColor: text('user_bubble_color'),
+    botBubbleBg: text('bot_bubble_bg'),
+    launcherSize: integer('launcher_size').default(3).notNull(),
+    widgetPosition: text('widget_position').default('bottom-right'),
+    launcherTransparent: boolean('launcher_transparent').default(false).notNull(),
+    headerLogoBg: text('header_logo_bg'), // null=default white tint, 'transparent', or '#hex'
+    botAvatarBg: text('bot_avatar_bg'), // null=primary color, 'transparent', or '#hex'
+    launcherBg: text('launcher_bg'), // null=primary color, 'transparent', or '#hex'
+    tenantThemeId: uuid('tenant_theme_id'), // FK set after tenantThemes table is defined
+    headerSubtext: text('header_subtext'), // optional subtitle shown below bot name in header
+    headerNameColor: text('header_name_color'), // null=auto contrast, or '#hex'
+    headerBg: text('header_bg'), // null=default gradient, 'transparent', or '#hex' solid
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -143,6 +159,8 @@ export const conversations = pgTable('conversations', {
     visitorId: text('visitor_id'), // anonymous browser fingerprint
     visitorEmail: text('visitor_email'), // if lead capture
     visitorName: text('visitor_name'),
+    visitorPhone: text('visitor_phone'),
+    leadData: jsonb('lead_data').default({}).notNull(),
     messageCount: integer('message_count').default(0).notNull(),
     startedAt: timestamp('started_at').defaultNow().notNull(),
     lastMessageAt: timestamp('last_message_at').defaultNow().notNull(),
@@ -189,6 +207,36 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
 }, (t) => ({
     tokenIdx: index('prt_token_idx').on(t.token),
 }));
+// ─── Tenant Custom Themes ─────────────────────────────────────────────────────
+export const tenantThemes = pgTable('tenant_themes', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    primaryColor: text('primary_color').notNull().default('#7c3aed'),
+    userBubbleColor: text('user_bubble_color').notNull().default('#6d28d9'),
+    botBubbleBg: text('bot_bubble_bg').notNull().default('#f5f3ff'),
+    botTextColor: text('bot_text_color').notNull().default('#2e1065'),
+    windowBg: text('window_bg').notNull().default('#ffffff'),
+    inputBg: text('input_bg').notNull().default('#f8fafc'),
+    headerLogoBg: text('header_logo_bg'), // null=default, 'transparent', or '#hex'
+    headerTextColor: text('header_text_color'), // null=auto-contrast, or '#hex'
+    userText: text('user_text').notNull().default('#ffffff'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    tenantIdx: index('tenant_themes_tenant_idx').on(t.tenantId),
+}));
+// ─── Bot Avatar Presets (admin-managed, selectable by all users) ──────────────
+export const botAvatarPresets = pgTable('bot_avatar_presets', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    imageUrl: text('image_url').notNull(),
+    isDefault: boolean('is_default').default(false).notNull(),
+    displayOrder: integer('display_order').default(0).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+    displayOrderIdx: index('bot_avatar_presets_order_idx').on(t.displayOrder),
+}));
 // ─── Relations ─────────────────────────────────────────────────────────────────
 export const tenantsRelations = relations(tenants, ({ many }) => ({
     users: many(users),
@@ -197,8 +245,12 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
 export const usersRelations = relations(users, ({ one }) => ({
     tenant: one(tenants, { fields: [users.tenantId], references: [tenants.id] }),
 }));
+export const tenantThemesRelations = relations(tenantThemes, ({ one }) => ({
+    tenant: one(tenants, { fields: [tenantThemes.tenantId], references: [tenants.id] }),
+}));
 export const botsRelations = relations(bots, ({ one, many }) => ({
     tenant: one(tenants, { fields: [bots.tenantId], references: [tenants.id] }),
+    tenantTheme: one(tenantThemes, { fields: [bots.tenantThemeId], references: [tenantThemes.id] }),
     documents: many(botDocuments),
     conversations: many(conversations),
 }));

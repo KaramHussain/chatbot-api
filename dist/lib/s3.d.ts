@@ -12,4 +12,9 @@ export declare function buildDocumentKey(params: {
     filename: string;
 }): string;
 export declare function buildLogoKey(tenantId: string, botId: string, ext: string): string;
+export declare function putObject(key: string, body: Buffer, contentType: string): Promise<void>;
+export declare function getObjectStream(key: string): Promise<{
+    body: ReadableStream;
+    contentType: string;
+}>;
 //# sourceMappingURL=s3.d.ts.map

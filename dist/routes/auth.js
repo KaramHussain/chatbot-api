@@ -11,7 +11,7 @@ const mailer = nodemailer.createTransport({
     service: 'gmail',
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
 });
-const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'https://chat.cloudgeniee.com';
 const router = new Hono();
 // POST /api/auth/login
 const loginSchema = z.object({
@@ -93,7 +93,7 @@ router.post('/forgot-password', zValidator('json', z.object({ email: z.string().
     // Invalidate old tokens for this user
     await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id));
     const token = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
     await db.insert(passwordResetTokens).values({ userId: user.id, token, expiresAt });
     const resetUrl = `${DASHBOARD_URL}/reset-password/${token}`;
     await mailer.sendMail({
@@ -103,7 +103,7 @@ router.post('/forgot-password', zValidator('json', z.object({ email: z.string().
         html: `
       <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;padding:40px 24px">
         <h2 style="font-size:24px;font-weight:700;margin-bottom:8px">Reset your password</h2>
-        <p style="color:#6b7280;margin-bottom:32px">Click the button below to set a new password. This link expires in 1 hour.</p>
+        <p style="color:#6b7280;margin-bottom:32px">Click the button below to set a new password. This link expires in 24 hours.</p>
         <a href="${resetUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Reset Password</a>
         <p style="color:#9ca3af;font-size:12px;margin-top:32px">If you didn't request this, you can safely ignore this email.</p>
       </div>

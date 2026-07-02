@@ -1,20 +1,15 @@
 import { Hono } from 'hono';
-import { db, tenants } from '../db/index.js';
-import { eq, sql } from 'drizzle-orm';
+import { db, tenants, botChunks, botDocuments, conversations } from '../db/index.js';
+import { eq } from 'drizzle-orm';
 const router = new Hono();
 // DELETE /api/account/data — wipe RAG/conversation data, keep account
 router.delete('/data', async (c) => {
     const user = c.get('user');
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
-    await db.execute(sql `
-    DELETE FROM bot_chunks WHERE tenant_id = ${user.tenantId};
-    DELETE FROM bot_documents WHERE tenant_id = ${user.tenantId};
-    DELETE FROM conversations WHERE tenant_id = ${user.tenantId};
-  `);
-    await db.update(tenants)
-        .set({ tokensUsedThisMonth: 0, messagesThisMonth: 0, updatedAt: new Date() })
-        .where(eq(tenants.id, user.tenantId));
+    await db.delete(botChunks).where(eq(botChunks.tenantId, user.tenantId));
+    await db.delete(botDocuments).where(eq(botDocuments.tenantId, user.tenantId));
+    await db.delete(conversations).where(eq(conversations.tenantId, user.tenantId));
     return c.json({ success: true });
 });
 // DELETE /api/account — delete own account + all associated data

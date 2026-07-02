@@ -196,23 +196,42 @@ router.get('/history/:conversationId', async (c) => {
   return c.json({ messages: msgs });
 });
 
-// PATCH /api/chat/lead — save visitor email/name from lead capture form (public)
+// PATCH /api/chat/lead — save visitor lead data from lead capture form (public)
 router.patch('/lead', async (c) => {
   const body = await c.req.json().catch(() => null);
-  if (!body?.conversationId || !body?.email || !body?.name) {
-    return c.json({ error: 'conversationId, email, and name are required' }, 400);
+  if (!body?.conversationId) return c.json({ error: 'conversationId required' }, 400);
+
+  // Support new { fields } format and old { email, name } format
+  let fields: Record<string, string> = {};
+  if (body.fields && typeof body.fields === 'object') {
+    fields = body.fields;
+  } else if (body.email) {
+    if (body.email) fields.email = body.email;
+    if (body.name) fields.name = body.name;
   }
-  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRe.test(body.email)) return c.json({ error: 'Invalid email' }, 400);
+
+  if (Object.keys(fields).length === 0) return c.json({ error: 'At least one field required' }, 400);
+
+  const updates: Record<string, any> = {};
+  if (fields.email) {
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRe.test(fields.email)) return c.json({ error: 'Invalid email' }, 400);
+    updates.visitorEmail = fields.email.trim();
+  }
+  if (fields.name) updates.visitorName = fields.name.trim() || null;
+  if (fields.phone) updates.visitorPhone = fields.phone.trim() || null;
+
+  // Any non-standard fields go into leadData JSONB
+  const customEntries = Object.entries(fields).filter(([k]) => !['email', 'name', 'phone'].includes(k));
+  if (customEntries.length > 0) {
+    updates.leadData = Object.fromEntries(customEntries.map(([k, v]) => [k, String(v).trim()]));
+  }
 
   const [conv] = await db.select({ id: conversations.id })
     .from(conversations).where(eq(conversations.id, body.conversationId)).limit(1);
   if (!conv) return c.json({ error: 'Not found' }, 404);
 
-  await db.update(conversations)
-    .set({ visitorEmail: body.email.trim(), visitorName: body.name.trim() || null })
-    .where(eq(conversations.id, body.conversationId));
-
+  await db.update(conversations).set(updates).where(eq(conversations.id, body.conversationId));
   return c.json({ success: true });
 });
 

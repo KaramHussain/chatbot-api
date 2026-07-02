@@ -1,5 +1,5 @@
 import type { HonoEnv, JwtPayload } from '../types/index.js';
-export declare const JWT_EXPIRY = "7d";
+export declare const JWT_EXPIRY = "24h";
 export declare function signToken(payload: JwtPayload): Promise<string>;
 export declare function verifyToken(token: string): Promise<JwtPayload>;
 export declare const authMiddleware: import("hono").MiddlewareHandler<HonoEnv, string, {}, Response>;

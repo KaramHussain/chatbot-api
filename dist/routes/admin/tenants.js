@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, tenants, users } from '../../db/index.js';
-import { eq, desc, sql } from 'drizzle-orm';
+import { db, tenants, users, botChunks, botDocuments, conversations } from '../../db/index.js';
+import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 const router = new Hono();
 // GET /api/admin/tenants
@@ -83,6 +83,7 @@ const updateTenantSchema = z.object({
     aiModel: z.string().optional(),
     monthlyTokenBudget: z.number().int().min(0).optional(),
     sessionDurationMinutes: z.number().int().min(1).max(43200).optional(),
+    maxUploadMb: z.number().int().min(1).max(500).nullable().optional(),
 });
 router.put('/:id', zValidator('json', updateTenantSchema), async (c) => {
     const { id } = c.req.param();
@@ -102,11 +103,9 @@ router.delete('/:id/data', async (c) => {
     const [tenant] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
     if (!tenant)
         return c.json({ error: 'Not found' }, 404);
-    // Delete bot chunks → documents (cascades); conversations + messages also cascade from bots
-    await db.execute(sql `DELETE FROM bot_chunks WHERE tenant_id = ${id};
-        DELETE FROM bot_documents WHERE tenant_id = ${id};
-        DELETE FROM conversations WHERE tenant_id = ${id};`);
-    await db.update(tenants).set({ tokensUsedThisMonth: 0, messagesThisMonth: 0, updatedAt: new Date() }).where(eq(tenants.id, id));
+    await db.delete(botChunks).where(eq(botChunks.tenantId, id));
+    await db.delete(botDocuments).where(eq(botDocuments.tenantId, id));
+    await db.delete(conversations).where(eq(conversations.tenantId, id));
     return c.json({ success: true });
 });
 // DELETE /api/admin/tenants/:id — delete tenant + everything

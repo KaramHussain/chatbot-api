@@ -20,6 +20,7 @@ router.get('/:botId', async (c) => {
       launcherLogoUrl: bots.launcherLogoUrl,
       leadCaptureEnabled: bots.leadCaptureEnabled,
       leadCaptureMessage: bots.leadCaptureMessage,
+      leadCaptureFields: bots.leadCaptureFields,
       status: bots.status,
       themeName: bots.themeName,
       userBubbleColor: bots.userBubbleColor,

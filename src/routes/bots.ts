@@ -103,6 +103,13 @@ const updateBotSchema = z.object({
   status: z.enum(['active', 'inactive']).optional(),
   leadCaptureEnabled: z.boolean().optional(),
   leadCaptureMessage: z.string().max(300).optional(),
+  leadCaptureFields: z.array(z.object({
+    id: z.string().max(50),
+    label: z.string().max(100),
+    type: z.enum(['text', 'email', 'tel']),
+    required: z.boolean(),
+    placeholder: z.string().max(100).optional(),
+  })).optional(),
   llmModel: z.string().optional(),
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
   themeName: z.string().max(50).optional(),
@@ -274,6 +281,7 @@ router.get('/:id/conversations', async (c) => {
       totalConversations: count(conversations.id),
       totalMessages: sql<number>`coalesce(sum(${conversations.messageCount}), 0)`,
       uniqueVisitors: sql<number>`count(distinct ${conversations.visitorId})`,
+      leadsCount: sql<number>`count(case when ${conversations.visitorEmail} is not null then 1 end)`,
     })
     .from(conversations)
     .where(where);
@@ -294,11 +302,50 @@ router.get('/:id/conversations', async (c) => {
       totalConversations: total,
       totalMessages: Number(statsRow?.totalMessages ?? 0),
       uniqueVisitors: Number(statsRow?.uniqueVisitors ?? 0),
+      leadsCount: Number(statsRow?.leadsCount ?? 0),
     },
     total,
     page,
     totalPages: Math.max(1, Math.ceil(total / limit)),
   });
+});
+
+// GET /api/bots/:id/conversations/export — CSV download
+router.get('/:id/conversations/export', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const toDate = to ? new Date(to) : undefined;
+  if (toDate) toDate.setHours(23, 59, 59, 999);
+
+  const where = and(
+    eq(conversations.botId, id),
+    eq(conversations.tenantId, tenantId),
+    from ? gte(conversations.startedAt, new Date(from)) : undefined,
+    toDate ? lte(conversations.startedAt, toDate) : undefined,
+  );
+
+  const rows = await db.select().from(conversations).where(where)
+    .orderBy(desc(conversations.lastMessageAt)).limit(10000);
+
+  const csvHeaders = ['ID', 'Name', 'Email', 'Phone', 'Messages', 'Started At', 'Last Message At', 'Visitor ID'];
+  const csvRows = rows.map((r: any) => [
+    r.id, r.visitorName ?? '', r.visitorEmail ?? '', r.visitorPhone ?? '',
+    r.messageCount, r.startedAt?.toISOString() ?? '', r.lastMessageAt?.toISOString() ?? '', r.visitorId ?? '',
+  ]);
+
+  const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [csvHeaders, ...csvRows].map(row => row.map(escape).join(',')).join('\n');
+
+  c.header('Content-Type', 'text/csv; charset=utf-8');
+  c.header('Content-Disposition', `attachment; filename="conversations.csv"`);
+  return c.text(csv);
 });
 
 // GET /api/bots/:id/conversations/:conversationId/messages
