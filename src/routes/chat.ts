@@ -183,7 +183,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   });
 });
 
-// GET /api/chat/history/:conversationId — conversation history (for dashboard)
+// GET /api/chat/history/:conversationId — conversation history (for dashboard + widget resume)
 router.get('/history/:conversationId', async (c) => {
   const { conversationId } = c.req.param();
 
@@ -194,6 +194,26 @@ router.get('/history/:conversationId', async (c) => {
     .orderBy(asc(messages.createdAt));
 
   return c.json({ messages: msgs });
+});
+
+// PATCH /api/chat/lead — save visitor email/name from lead capture form (public)
+router.patch('/lead', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body?.conversationId || !body?.email || !body?.name) {
+    return c.json({ error: 'conversationId, email, and name are required' }, 400);
+  }
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRe.test(body.email)) return c.json({ error: 'Invalid email' }, 400);
+
+  const [conv] = await db.select({ id: conversations.id })
+    .from(conversations).where(eq(conversations.id, body.conversationId)).limit(1);
+  if (!conv) return c.json({ error: 'Not found' }, 404);
+
+  await db.update(conversations)
+    .set({ visitorEmail: body.email.trim(), visitorName: body.name.trim() || null })
+    .where(eq(conversations.id, body.conversationId));
+
+  return c.json({ success: true });
 });
 
 export default router;
