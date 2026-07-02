@@ -286,16 +286,37 @@ router.get('/:id/conversations/export', async (c) => {
     const where = and(eq(conversations.botId, id), eq(conversations.tenantId, tenantId), from ? gte(conversations.startedAt, new Date(from)) : undefined, toDate ? lte(conversations.startedAt, toDate) : undefined);
     const rows = await db.select().from(conversations).where(where)
         .orderBy(desc(conversations.lastMessageAt)).limit(10000);
-    const csvHeaders = ['ID', 'Name', 'Email', 'Phone', 'Messages', 'Started At', 'Last Message At', 'Visitor ID'];
-    const csvRows = rows.map((r) => [
-        r.id, r.visitorName ?? '', r.visitorEmail ?? '', r.visitorPhone ?? '',
-        r.messageCount, r.startedAt?.toISOString() ?? '', r.lastMessageAt?.toISOString() ?? '', r.visitorId ?? '',
-    ]);
-    const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = [csvHeaders, ...csvRows].map(row => row.map(escape).join(',')).join('\n');
-    c.header('Content-Type', 'text/csv; charset=utf-8');
-    c.header('Content-Disposition', `attachment; filename="conversations.csv"`);
-    return c.text(csv);
+    const fmtDate = (d) => {
+        if (!d)
+            return '';
+        return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    };
+    const fmtDur = (start, end) => {
+        const diff = Math.floor((end.getTime() - start.getTime()) / 1000);
+        if (diff < 60)
+            return `${diff}s`;
+        if (diff < 3600)
+            return `${Math.floor(diff / 60)}m ${diff % 60}s`;
+        return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`;
+    };
+    const data = rows.map((r) => {
+        const base = {
+            Name: r.visitorName || '',
+            Email: r.visitorEmail || '',
+            Phone: r.visitorPhone || '',
+            Messages: r.messageCount,
+            Duration: r.messageCount > 1 ? fmtDur(r.startedAt, r.lastMessageAt) : '',
+            'Started At': fmtDate(r.startedAt),
+        };
+        if (r.leadData && typeof r.leadData === 'object') {
+            for (const [k, v] of Object.entries(r.leadData)) {
+                base[k.charAt(0).toUpperCase() + k.slice(1)] = v;
+            }
+        }
+        return base;
+    });
+    const [botRow] = await db.select({ name: bots.name }).from(bots).where(eq(bots.id, id)).limit(1);
+    return c.json({ botName: botRow?.name ?? 'Bot', total: data.length, conversations: data });
 });
 // GET /api/bots/:id/conversations/:conversationId/messages
 router.get('/:id/conversations/:conversationId/messages', async (c) => {
