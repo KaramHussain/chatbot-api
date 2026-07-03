@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { db, tenants, users, bots, botChunks, botDocuments, conversations } from '../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql, and, gte, count } from 'drizzle-orm';
 import type { HonoEnv } from '../types/index.js';
 
 const router = new Hono<HonoEnv>();
@@ -63,6 +63,48 @@ router.patch('/settings', async (c) => {
     .where(eq(tenants.id, user.tenantId));
 
   return c.json({ success: true });
+});
+
+// GET /api/account/analytics — 30-day daily conversation + lead counts across all bots
+router.get('/analytics', async (c) => {
+  const user = c.get('user');
+  if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
+
+  const since = new Date();
+  since.setDate(since.getDate() - 29);
+  since.setHours(0, 0, 0, 0);
+
+  const rows = await db
+    .select({
+      date: sql<string>`DATE(${conversations.startedAt})::text`,
+      conversations: count(conversations.id),
+      leads: sql<number>`count(case when ${conversations.visitorEmail} is not null then 1 end)`,
+    })
+    .from(conversations)
+    .where(and(
+      eq(conversations.tenantId, user.tenantId),
+      gte(conversations.startedAt, since),
+    ))
+    .groupBy(sql`DATE(${conversations.startedAt})`)
+    .orderBy(sql`DATE(${conversations.startedAt})`);
+
+  const [totalsRow] = await db
+    .select({
+      totalConversations: count(conversations.id),
+      totalLeads: sql<number>`count(case when ${conversations.visitorEmail} is not null then 1 end)`,
+      totalMessages: sql<number>`coalesce(sum(${conversations.messageCount}), 0)`,
+    })
+    .from(conversations)
+    .where(eq(conversations.tenantId, user.tenantId));
+
+  return c.json({
+    daily: rows.map(r => ({ date: r.date, conversations: Number(r.conversations), leads: Number(r.leads) })),
+    totals: {
+      conversations: Number(totalsRow?.totalConversations ?? 0),
+      leads: Number(totalsRow?.totalLeads ?? 0),
+      messages: Number(totalsRow?.totalMessages ?? 0),
+    },
+  });
 });
 
 export default router;
