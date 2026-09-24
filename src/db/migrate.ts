@@ -1,8 +1,6 @@
 // Run this script once to apply migrations: npx tsx src/db/migrate.ts
-import { loadSecretsIfNeeded } from '../lib/secrets.js';
 import { config as dotenvConfig } from 'dotenv';
 dotenvConfig();
-await loadSecretsIfNeeded();
 
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';

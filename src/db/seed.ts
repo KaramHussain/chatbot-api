@@ -5,10 +5,8 @@
  * Usage:
  *   ADMIN_EMAIL=you@cloudgeniee.com ADMIN_PASSWORD=YourPassword npx tsx src/db/seed.ts
  */
-import { loadSecretsIfNeeded } from '../lib/secrets.js';
 import { config as dotenvConfig } from 'dotenv';
 dotenvConfig();
-await loadSecretsIfNeeded();
 
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
