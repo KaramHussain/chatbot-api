@@ -168,7 +168,7 @@ export const botChunks = pgTable('bot_chunks', {
 }, (t) => ({
   botIdIdx: index('bot_chunks_bot_id_idx').on(t.botId),
   documentIdIdx: index('bot_chunks_document_id_idx').on(t.documentId),
-  // ivfflat index created separately in migration SQL (Drizzle doesn't support it natively)
+  // hnsw index created separately in migration SQL (Drizzle doesn't support it natively)
 }));
 
 // ─── Conversations ─────────────────────────────────────────────────────────────

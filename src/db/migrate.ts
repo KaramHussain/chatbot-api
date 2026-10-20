@@ -13,12 +13,13 @@ console.log('Running migrations...');
 await migrate(db, { migrationsFolder: './src/db/migrations' });
 console.log('Migrations complete.');
 
-// Create ivfflat index for vector search after schema migration
+// Switch vector index from ivfflat to HNSW (faster + more accurate search)
+await client`DROP INDEX IF EXISTS bot_chunks_embedding_idx`;
 await client`
   CREATE INDEX IF NOT EXISTS bot_chunks_embedding_idx
-  ON bot_chunks USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100)
+  ON bot_chunks USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64)
 `;
-console.log('Vector index created.');
+console.log('HNSW vector index created.');
 
 await client.end();
