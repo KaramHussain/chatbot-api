@@ -24,5 +24,8 @@ console.log('Google auth columns ready.');
 // Pricing tiers: booking placeholder toggle
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS booking_enabled boolean DEFAULT false NOT NULL`;
 console.log('Booking column ready.');
+// Draft bots: unfinished creations are saved as drafts
+await client `ALTER TYPE bot_status ADD VALUE IF NOT EXISTS 'draft'`;
+console.log('Draft bot status ready.');
 await client.end();
 //# sourceMappingURL=migrate.js.map

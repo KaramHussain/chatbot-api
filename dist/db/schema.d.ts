@@ -3,7 +3,7 @@ export declare const tenantPlanEnum: import("drizzle-orm/pg-core").PgEnum<["star
 export declare const tenantStatusEnum: import("drizzle-orm/pg-core").PgEnum<["active", "suspended", "pending"]>;
 export declare const documentTypeEnum: import("drizzle-orm/pg-core").PgEnum<["pdf", "txt", "docx", "url"]>;
 export declare const documentStatusEnum: import("drizzle-orm/pg-core").PgEnum<["pending", "processing", "ready", "failed"]>;
-export declare const botStatusEnum: import("drizzle-orm/pg-core").PgEnum<["active", "inactive"]>;
+export declare const botStatusEnum: import("drizzle-orm/pg-core").PgEnum<["active", "inactive", "draft"]>;
 export declare const messageRoleEnum: import("drizzle-orm/pg-core").PgEnum<["user", "assistant"]>;
 export declare const tenants: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "tenants";
@@ -649,14 +649,14 @@ export declare const bots: import("drizzle-orm/pg-core").PgTableWithColumns<{
             tableName: "bots";
             dataType: "string";
             columnType: "PgEnumColumn";
-            data: "active" | "inactive";
+            data: "active" | "inactive" | "draft";
             driverParam: string;
             notNull: true;
             hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;
-            enumValues: ["active", "inactive"];
+            enumValues: ["active", "inactive", "draft"];
             baseColumn: never;
             identity: undefined;
             generated: undefined;

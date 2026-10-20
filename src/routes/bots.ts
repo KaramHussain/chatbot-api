@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, bots, botChunks, conversations, messages, tenants } from '../db/index.js';
+import { db, bots, botChunks, botDocuments, conversations, messages, tenants } from '../db/index.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
 import sharp from 'sharp';
@@ -56,6 +56,7 @@ const createBotSchema = z.object({
   leadCaptureEnabled: z.boolean().default(false),
   leadCaptureMessage: z.string().max(300).optional(),
   bookingEnabled: z.boolean().optional(),
+  status: z.enum(['active', 'inactive', 'draft']).optional(),
   themeName: z.string().max(50).optional(),
   userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
@@ -85,13 +86,16 @@ router.post('/', zValidator('json', createBotSchema), async (c) => {
     return c.json({ error: 'Lead capture requires a paid plan. Upgrade in Settings to enable it.' }, 403);
   }
 
-  const [{ total: botCount }] = await db
-    .select({ total: count(bots.id) })
-    .from(bots)
-    .where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
+  // Drafts are free and don't count toward the limit; only enforce the cap when creating an active bot.
+  if (body.status !== 'draft' && body.status !== 'inactive') {
+    const [{ total: botCount }] = await db
+      .select({ total: count(bots.id) })
+      .from(bots)
+      .where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
 
-  if (Number(botCount) >= plan.maxBots) {
-    return c.json({ error: `Your ${plan.label} plan allows up to ${plan.maxBots} bot${plan.maxBots === 1 ? '' : 's'}. Upgrade to create more.` }, 403);
+    if (Number(botCount) >= plan.maxBots) {
+      return c.json({ error: `Your ${plan.label} plan allows up to ${plan.maxBots} bot${plan.maxBots === 1 ? '' : 's'}. Upgrade to create more.` }, 403);
+    }
   }
 
   const [existing] = await db
@@ -118,7 +122,7 @@ const updateBotSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   systemPrompt: z.string().max(2000).nullable().optional(),
   allowedOrigins: z.array(z.string()).optional(),
-  status: z.enum(['active', 'inactive']).optional(),
+  status: z.enum(['active', 'inactive', 'draft']).optional(),
   leadCaptureEnabled: z.boolean().optional(),
   leadCaptureMessage: z.string().max(300).optional(),
   leadCaptureFields: z.array(z.object({
@@ -152,11 +156,27 @@ router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
   const { id } = c.req.param();
   const body = c.req.valid('json');
 
-  if (body.leadCaptureEnabled) {
+  if (body.leadCaptureEnabled || body.status === 'active') {
     const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
-    if (!plan.leadCaptureAllowed) {
+
+    if (body.leadCaptureEnabled && !plan.leadCaptureAllowed) {
       return c.json({ error: 'Lead capture requires a paid plan. Upgrade in Settings to enable it.' }, 403);
+    }
+
+    // Publishing/activating a bot: enforce the plan's active-bot cap (excluding this bot itself).
+    if (body.status === 'active') {
+      const [current] = await db.select({ status: bots.status }).from(bots)
+        .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+      if (current && current.status !== 'active') {
+        const [{ total: activeCount }] = await db
+          .select({ total: count(bots.id) })
+          .from(bots)
+          .where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
+        if (Number(activeCount) >= plan.maxBots) {
+          return c.json({ error: `Your ${plan.label} plan allows up to ${plan.maxBots} active bot${plan.maxBots === 1 ? '' : 's'}. Upgrade or deactivate another bot first.` }, 403);
+        }
+      }
     }
   }
 
@@ -181,6 +201,33 @@ router.delete('/:id', async (c) => {
     .returning({ id: bots.id });
 
   if (!deleted) return c.json({ error: 'Not found' }, 404);
+  return c.json({ success: true });
+});
+
+// DELETE /api/bots/:id/conversations — wipe this bot's chat history (messages cascade from conversations)
+router.delete('/:id/conversations', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  await db.delete(conversations).where(and(eq(conversations.botId, id), eq(conversations.tenantId, tenantId)));
+  return c.json({ success: true });
+});
+
+// DELETE /api/bots/:id/knowledge — wipe this bot's indexed documents + vector chunks (DB rows only)
+router.delete('/:id/knowledge', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  await db.delete(botChunks).where(and(eq(botChunks.botId, id), eq(botChunks.tenantId, tenantId)));
+  await db.delete(botDocuments).where(and(eq(botDocuments.botId, id), eq(botDocuments.tenantId, tenantId)));
   return c.json({ success: true });
 });
 

@@ -24,7 +24,7 @@ export const tenantPlanEnum = pgEnum('tenant_plan', ['starter', 'growth', 'enter
 export const tenantStatusEnum = pgEnum('tenant_status', ['active', 'suspended', 'pending']);
 export const documentTypeEnum = pgEnum('document_type', ['pdf', 'txt', 'docx', 'url']);
 export const documentStatusEnum = pgEnum('document_status', ['pending', 'processing', 'ready', 'failed']);
-export const botStatusEnum = pgEnum('bot_status', ['active', 'inactive']);
+export const botStatusEnum = pgEnum('bot_status', ['active', 'inactive', 'draft']);
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant']);
 // ─── Tenants ───────────────────────────────────────────────────────────────────
 // Each tenant = one client company that buys our service
