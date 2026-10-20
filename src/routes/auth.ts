@@ -226,7 +226,7 @@ router.post('/forgot-password', zValidator('json', z.object({ email: z.string().
 
   await db.insert(passwordResetTokens).values({ userId: user.id, token, expiresAt });
 
-  const resetUrl = `${DASHBOARD_URL}/reset-password/${token}`;
+  const resetUrl = `${DASHBOARD_URL}/reset-password?token=${token}`;
 
   await mailer.sendMail({
     from: process.env.SMTP_FROM ?? 'CloudGeniee <cloudgeniee@gmail.com>',

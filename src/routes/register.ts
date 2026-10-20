@@ -49,7 +49,7 @@ router.post('/start', zValidator('json', z.object({ email: z.string().email() })
 
   await db.insert(emailVerifications).values({ token, email: normalised, expiresAt });
 
-  const verifyUrl = `${DASHBOARD_URL}/register/complete/${token}`;
+  const verifyUrl = `${DASHBOARD_URL}/register/complete?token=${token}`;
 
   await mailer.sendMail({
     from: `"CloudGeniee" <${process.env.SMTP_USER}>`,
