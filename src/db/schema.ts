@@ -72,7 +72,8 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
-  passwordHash: text('password_hash').notNull(),
+  passwordHash: text('password_hash'), // null for Google-only accounts
+  googleId: text('google_id'), // Google "sub" claim, set the first time this email logs in via Google
   name: text('name').notNull(),
   role: userRoleEnum('role').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
