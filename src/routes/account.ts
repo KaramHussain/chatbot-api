@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { db, tenants, users, bots, botChunks, botDocuments, conversations } from '../db/index.js';
 import { eq, sql, and, gte, count } from 'drizzle-orm';
 import type { HonoEnv } from '../types/index.js';
+import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
 
 const router = new Hono<HonoEnv>();
 
@@ -43,7 +44,35 @@ router.get('/settings', async (c) => {
     aiModel: tenants.aiModel,
   }).from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
 
-  return c.json({ settings: tenant });
+  if (!tenant) return c.json({ error: 'No tenant' }, 404);
+
+  const [{ total: botsUsed }] = await db.select({ total: count(bots.id) }).from(bots).where(eq(bots.tenantId, user.tenantId));
+  const plan = isPlanId(tenant.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
+
+  return c.json({ settings: { ...tenant, botsUsed: Number(botsUsed), maxBots: plan.maxBots } });
+});
+
+// POST /api/account/plan — switch subscription tier (no payment gateway yet: activates immediately)
+router.post('/plan', async (c) => {
+  const user = c.get('user');
+  if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
+
+  const body = await c.req.json<{ plan?: string }>();
+  if (!isPlanId(body.plan)) return c.json({ error: 'Invalid plan' }, 400);
+
+  const config = PLAN_CONFIG[body.plan];
+
+  await db.update(tenants)
+    .set({
+      plan: body.plan,
+      monthlyMessageLimit: config.monthlyMessageLimit,
+      monthlyTokenBudget: config.monthlyTokenBudget,
+      aiModel: config.aiModel,
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, user.tenantId));
+
+  return c.json({ success: true, plan: body.plan });
 });
 
 // PATCH /api/account/settings — tenant can update their own session duration

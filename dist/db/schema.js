@@ -56,7 +56,8 @@ export const users = pgTable('users', {
     id: uuid('id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
-    passwordHash: text('password_hash').notNull(),
+    passwordHash: text('password_hash'), // null for Google-only accounts
+    googleId: text('google_id'), // Google "sub" claim, set the first time this email logs in via Google
     name: text('name').notNull(),
     role: userRoleEnum('role').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -85,6 +86,8 @@ export const bots = pgTable('bots', {
     leadCaptureEnabled: boolean('lead_capture_enabled').default(false).notNull(),
     leadCaptureMessage: text('lead_capture_message').default('Leave your email and we\'ll follow up!'),
     leadCaptureFields: jsonb('lead_capture_fields').default([]).notNull(),
+    // Booking (placeholder toggle — scheduling logic ships later)
+    bookingEnabled: boolean('booking_enabled').default(false).notNull(),
     // LLM override (null = use global env default)
     llmModel: text('llm_model'),
     // Response style: balanced | concise | very_concise | detailed | bullet_points | professional | friendly
@@ -149,7 +152,7 @@ export const botChunks = pgTable('bot_chunks', {
 }, (t) => ({
     botIdIdx: index('bot_chunks_bot_id_idx').on(t.botId),
     documentIdIdx: index('bot_chunks_document_id_idx').on(t.documentId),
-    // ivfflat index created separately in migration SQL (Drizzle doesn't support it natively)
+    // hnsw index created separately in migration SQL (Drizzle doesn't support it natively)
 }));
 // ─── Conversations ─────────────────────────────────────────────────────────────
 export const conversations = pgTable('conversations', {

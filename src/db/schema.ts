@@ -103,6 +103,8 @@ export const bots = pgTable('bots', {
   leadCaptureEnabled: boolean('lead_capture_enabled').default(false).notNull(),
   leadCaptureMessage: text('lead_capture_message').default('Leave your email and we\'ll follow up!'),
   leadCaptureFields: jsonb('lead_capture_fields').default([]).notNull(),
+  // Booking (placeholder toggle — scheduling logic ships later)
+  bookingEnabled: boolean('booking_enabled').default(false).notNull(),
   // LLM override (null = use global env default)
   llmModel: text('llm_model'),
   // Response style: balanced | concise | very_concise | detailed | bullet_points | professional | friendly

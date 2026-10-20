@@ -27,4 +27,8 @@ await client`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`;
 await client`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id text`;
 console.log('Google auth columns ready.');
 
+// Pricing tiers: booking placeholder toggle
+await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS booking_enabled boolean DEFAULT false NOT NULL`;
+console.log('Booking column ready.');
+
 await client.end();

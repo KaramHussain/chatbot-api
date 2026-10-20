@@ -1,17 +1,62 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, users, passwordResetTokens } from '../db/index.js';
+import { db, users, tenants, passwordResetTokens } from '../db/index.js';
 import { eq, and, gt } from 'drizzle-orm';
 import { signToken, authMiddleware } from '../middleware/auth.js';
 import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
 import bcrypt from 'bcryptjs';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 const mailer = nodemailer.createTransport({
     service: 'gmail',
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
 });
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'https://chat.cloudgeniee.com';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const API_PUBLIC_URL = process.env.API_PUBLIC_URL ?? 'http://localhost:3001';
+const googleJWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+// Finds or creates a ChatGeniee user from a verified Google identity.
+// Same email as an existing account (any signup method) -> that's the same
+// person, log them in and silently record the Google link. New email ->
+// brand-new signup, auto-provision a tenant with zero blocking steps.
+async function upsertUserFromGoogle(email, googleName, googleId) {
+    const [existingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (existingUser) {
+        if (!existingUser.googleId) {
+            await db.update(users).set({ googleId, updatedAt: new Date() }).where(eq(users.id, existingUser.id));
+        }
+        return { user: existingUser, isNewAccount: false };
+    }
+    const baseSlug = googleName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'workspace';
+    let slug = baseSlug;
+    const [slugTaken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1);
+    if (slugTaken)
+        slug = `${baseSlug}-${randomBytes(3).toString('hex')}`;
+    const [newTenant] = await db.insert(tenants).values({ name: `${googleName}'s Team`, slug }).returning();
+    const [newUser] = await db
+        .insert(users)
+        .values({ tenantId: newTenant.id, email, name: googleName, passwordHash: null, googleId, role: 'client_admin' })
+        .returning();
+    return { user: newUser, isNewAccount: true };
+}
+// Renders the tiny page that runs inside the Google sign-in popup once it's
+// done — hands the result back to the window that opened it, then closes.
+function googleAuthResultPage(payload, targetOrigin) {
+    return `<!doctype html><html><body>
+<script>
+  if (window.opener) {
+    window.opener.postMessage(${JSON.stringify({ source: 'chatgeniee-google-auth', ...payload })}, ${JSON.stringify(targetOrigin)});
+  }
+  window.close();
+</script>
+</body></html>`;
+}
 const router = new Hono();
 // POST /api/auth/login
 const loginSchema = z.object({
@@ -25,8 +70,8 @@ router.post('/login', zValidator('json', loginSchema), async (c) => {
         .from(users)
         .where(eq(users.email, email.toLowerCase()))
         .limit(1);
-    if (!user) {
-        // Prevent timing attacks — always run bcrypt even on missing user
+    if (!user || !user.passwordHash) {
+        // Prevent timing attacks — always run bcrypt even on missing user / Google-only account
         await bcrypt.compare(password, '$2b$10$invalidhashtopreventtimingattack');
         return c.json({ error: 'Invalid email or password' }, 401);
     }
@@ -53,6 +98,71 @@ router.post('/login', zValidator('json', loginSchema), async (c) => {
         },
     });
 });
+// GET /api/auth/google/callback — Google redirects here after the user signs
+// in inside a popup window that the dashboard opened itself (so the dashboard
+// controls the popup's size/position — Google's own rendered button doesn't
+// allow that). This page runs inside that popup: it exchanges the code for
+// Google's identity, resolves the ChatGeniee account, then hands the result
+// back to the dashboard tab via postMessage and closes itself.
+router.get('/google/callback', async (c) => {
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    const oauthError = c.req.query('error');
+    const origin = new URL(DASHBOARD_URL).origin;
+    const fail = (error) => c.html(googleAuthResultPage({ ok: false, error, state }, origin));
+    if (oauthError)
+        return fail(oauthError);
+    if (!code)
+        return fail('missing_code');
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
+        return fail('not_configured');
+    try {
+        const redirectUri = `${API_PUBLIC_URL}/api/auth/google/callback`;
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                code,
+                client_id: GOOGLE_CLIENT_ID,
+                client_secret: GOOGLE_CLIENT_SECRET,
+                redirect_uri: redirectUri,
+                grant_type: 'authorization_code',
+            }),
+        });
+        const tokenJson = (await tokenRes.json());
+        if (!tokenRes.ok || !tokenJson.id_token)
+            return fail('token_exchange_failed');
+        const { payload } = await jwtVerify(tokenJson.id_token, googleJWKS, {
+            issuer: ['https://accounts.google.com', 'accounts.google.com'],
+            audience: GOOGLE_CLIENT_ID,
+        });
+        const email = payload.email?.toLowerCase();
+        const emailVerified = payload.email_verified === true;
+        const googleId = payload.sub;
+        const googleName = payload.name?.trim() || email?.split('@')[0] || 'there';
+        if (!email || !emailVerified)
+            return fail('email_not_verified');
+        const { user, isNewAccount } = await upsertUserFromGoogle(email, googleName, googleId);
+        const jwtPayload = {
+            sub: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            tenantId: user.tenantId,
+        };
+        const token = await signToken(jwtPayload);
+        return c.html(googleAuthResultPage({
+            ok: true,
+            state,
+            token,
+            user: { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId },
+            isNewAccount,
+        }, origin));
+    }
+    catch {
+        return fail('server_error');
+    }
+});
 // POST /api/auth/me — verify token and return current user
 router.get('/me', authMiddleware, async (c) => {
     const user = c.get('user');
@@ -71,6 +181,9 @@ router.post('/change-password', authMiddleware, zValidator('json', changePasswor
         .from(users)
         .where(eq(users.id, authUser.id))
         .limit(1);
+    if (!user.passwordHash) {
+        return c.json({ error: 'This account signed up with Google and has no password to change' }, 400);
+    }
     const valid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!valid) {
         return c.json({ error: 'Current password is incorrect' }, 400);
@@ -95,7 +208,7 @@ router.post('/forgot-password', zValidator('json', z.object({ email: z.string().
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
     await db.insert(passwordResetTokens).values({ userId: user.id, token, expiresAt });
-    const resetUrl = `${DASHBOARD_URL}/reset-password/${token}`;
+    const resetUrl = `${DASHBOARD_URL}/reset-password?token=${token}`;
     await mailer.sendMail({
         from: process.env.SMTP_FROM ?? 'CloudGeniee <cloudgeniee@gmail.com>',
         to: email,

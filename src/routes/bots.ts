@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, bots, botChunks, conversations, messages } from '../db/index.js';
+import { db, bots, botChunks, conversations, messages, tenants } from '../db/index.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
 import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
+import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
 
 const router = new Hono<HonoEnv>();
 
@@ -54,6 +55,7 @@ const createBotSchema = z.object({
   allowedOrigins: z.array(z.string().url()).default([]),
   leadCaptureEnabled: z.boolean().default(false),
   leadCaptureMessage: z.string().max(300).optional(),
+  bookingEnabled: z.boolean().optional(),
   themeName: z.string().max(50).optional(),
   userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
@@ -75,6 +77,22 @@ const createBotSchema = z.object({
 router.post('/', zValidator('json', createBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const body = c.req.valid('json');
+
+  const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
+
+  if (body.leadCaptureEnabled && !plan.leadCaptureAllowed) {
+    return c.json({ error: 'Lead capture requires a paid plan. Upgrade in Settings to enable it.' }, 403);
+  }
+
+  const [{ total: botCount }] = await db
+    .select({ total: count(bots.id) })
+    .from(bots)
+    .where(eq(bots.tenantId, tenantId));
+
+  if (Number(botCount) >= plan.maxBots) {
+    return c.json({ error: `Your ${plan.label} plan allows up to ${plan.maxBots} bot${plan.maxBots === 1 ? '' : 's'}. Upgrade to create more.` }, 403);
+  }
 
   const [existing] = await db
     .select({ id: bots.id })
@@ -110,6 +128,7 @@ const updateBotSchema = z.object({
     required: z.boolean(),
     placeholder: z.string().max(100).optional(),
   })).optional(),
+  bookingEnabled: z.boolean().optional(),
   llmModel: z.string().optional(),
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
   themeName: z.string().max(50).optional(),
@@ -132,6 +151,14 @@ router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const { id } = c.req.param();
   const body = c.req.valid('json');
+
+  if (body.leadCaptureEnabled) {
+    const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
+    if (!plan.leadCaptureAllowed) {
+      return c.json({ error: 'Lead capture requires a paid plan. Upgrade in Settings to enable it.' }, 403);
+    }
+  }
 
   const [updated] = await db
     .update(bots)
