@@ -17,7 +17,54 @@ const mailer = nodemailer.createTransport({
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'https://chat.cloudgeniee.com';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const API_PUBLIC_URL = process.env.API_PUBLIC_URL ?? 'http://localhost:3001';
 const googleJWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+
+// Finds or creates a ChatGeniee user from a verified Google identity.
+// Same email as an existing account (any signup method) -> that's the same
+// person, log them in and silently record the Google link. New email ->
+// brand-new signup, auto-provision a tenant with zero blocking steps.
+async function upsertUserFromGoogle(email: string, googleName: string, googleId: string) {
+  const [existingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  if (existingUser) {
+    if (!existingUser.googleId) {
+      await db.update(users).set({ googleId, updatedAt: new Date() }).where(eq(users.id, existingUser.id));
+    }
+    return { user: existingUser, isNewAccount: false };
+  }
+
+  const baseSlug = googleName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'workspace';
+
+  let slug = baseSlug;
+  const [slugTaken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1);
+  if (slugTaken) slug = `${baseSlug}-${randomBytes(3).toString('hex')}`;
+
+  const [newTenant] = await db.insert(tenants).values({ name: `${googleName}'s Team`, slug }).returning();
+  const [newUser] = await db
+    .insert(users)
+    .values({ tenantId: newTenant.id, email, name: googleName, passwordHash: null, googleId, role: 'client_admin' })
+    .returning();
+
+  return { user: newUser, isNewAccount: true };
+}
+
+// Renders the tiny page that runs inside the Google sign-in popup once it's
+// done — hands the result back to the window that opened it, then closes.
+function googleAuthResultPage(payload: Record<string, unknown>, targetOrigin: string) {
+  return `<!doctype html><html><body>
+<script>
+  if (window.opener) {
+    window.opener.postMessage(${JSON.stringify({ source: 'chatgeniee-google-auth', ...payload })}, ${JSON.stringify(targetOrigin)});
+  }
+  window.close();
+</script>
+</body></html>`;
+}
 
 const router = new Hono<HonoEnv>();
 
@@ -69,103 +116,78 @@ router.post('/login', zValidator('json', loginSchema), async (c) => {
   });
 });
 
-// POST /api/auth/google — sign in or sign up with a Google ID token.
-//
-// Account-linking logic:
-//   1. Verify the token is really from Google and the email is Google-verified.
-//   2. Look up the user by that email, regardless of how they originally signed up.
-//      - Found  -> same person, log them in (and silently record the Google link
-//                  if this is the first time they've used Google on this account).
-//      - Not found -> brand-new signup. Auto-provision a tenant so there's zero
-//                  friction (name defaults from their Google profile; they can
-//                  rename it later in Settings — nothing blocks them getting in).
-router.post('/google', zValidator('json', z.object({ credential: z.string().min(1) })), async (c) => {
-  if (!GOOGLE_CLIENT_ID) {
-    return c.json({ error: 'Google sign-in is not configured on this server' }, 500);
-  }
+// GET /api/auth/google/callback — Google redirects here after the user signs
+// in inside a popup window that the dashboard opened itself (so the dashboard
+// controls the popup's size/position — Google's own rendered button doesn't
+// allow that). This page runs inside that popup: it exchanges the code for
+// Google's identity, resolves the ChatGeniee account, then hands the result
+// back to the dashboard tab via postMessage and closes itself.
+router.get('/google/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  const oauthError = c.req.query('error');
+  const origin = new URL(DASHBOARD_URL).origin;
 
-  const { credential } = c.req.valid('json');
+  const fail = (error: string) => c.html(googleAuthResultPage({ ok: false, error, state }, origin));
 
-  let payload;
+  if (oauthError) return fail(oauthError);
+  if (!code) return fail('missing_code');
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return fail('not_configured');
+
   try {
-    ({ payload } = await jwtVerify(credential, googleJWKS, {
+    const redirectUri = `${API_PUBLIC_URL}/api/auth/google/callback`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+    const tokenJson = (await tokenRes.json()) as { id_token?: string };
+    if (!tokenRes.ok || !tokenJson.id_token) return fail('token_exchange_failed');
+
+    const { payload } = await jwtVerify(tokenJson.id_token, googleJWKS, {
       issuer: ['https://accounts.google.com', 'accounts.google.com'],
       audience: GOOGLE_CLIENT_ID,
-    }));
-  } catch {
-    return c.json({ error: 'Invalid or expired Google credential' }, 401);
-  }
+    });
 
-  const email = (payload.email as string | undefined)?.toLowerCase();
-  const emailVerified = payload.email_verified === true;
-  const googleId = payload.sub as string;
-  const googleName = (payload.name as string | undefined)?.trim() || email?.split('@')[0] || 'there';
+    const email = (payload.email as string | undefined)?.toLowerCase();
+    const emailVerified = payload.email_verified === true;
+    const googleId = payload.sub as string;
+    const googleName = (payload.name as string | undefined)?.trim() || email?.split('@')[0] || 'there';
 
-  if (!email || !emailVerified) {
-    return c.json({ error: 'Your Google account email must be verified to sign in' }, 401);
-  }
+    if (!email || !emailVerified) return fail('email_not_verified');
 
-  const [existingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-  let user = existingUser;
+    const { user, isNewAccount } = await upsertUserFromGoogle(email, googleName, googleId);
 
-  if (user) {
-    // Same verified email as an existing account — link Google to it (first time only).
-    if (!user.googleId) {
-      await db.update(users).set({ googleId, updatedAt: new Date() }).where(eq(users.id, user.id));
-    }
-  } else {
-    // Brand-new signup via Google. Auto-create a tenant — no blocking "fill this in" step.
-    const baseSlug = googleName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'workspace';
-
-    let slug = baseSlug;
-    const [slugTaken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1);
-    if (slugTaken) slug = `${baseSlug}-${randomBytes(3).toString('hex')}`;
-
-    const [newTenant] = await db
-      .insert(tenants)
-      .values({ name: `${googleName}'s Team`, slug })
-      .returning();
-
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        tenantId: newTenant.id,
-        email,
-        name: googleName,
-        passwordHash: null,
-        googleId,
-        role: 'client_admin',
-      })
-      .returning();
-
-    user = newUser;
-  }
-
-  const jwtPayload: JwtPayload = {
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    tenantId: user.tenantId,
-  };
-
-  const token = await signToken(jwtPayload);
-
-  return c.json({
-    token,
-    user: {
-      id: user.id,
+    const jwtPayload: JwtPayload = {
+      sub: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       tenantId: user.tenantId,
-    },
-    isNewAccount: !existingUser,
-  });
+    };
+    const token = await signToken(jwtPayload);
+
+    return c.html(
+      googleAuthResultPage(
+        {
+          ok: true,
+          state,
+          token,
+          user: { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId },
+          isNewAccount,
+        },
+        origin
+      )
+    );
+  } catch {
+    return fail('server_error');
+  }
 });
 
 // POST /api/auth/me — verify token and return current user
