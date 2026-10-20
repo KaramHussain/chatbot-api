@@ -77,7 +77,7 @@ router.post('/', zValidator('json', createBotSchema), async (c) => {
     const [{ total: botCount }] = await db
         .select({ total: count(bots.id) })
         .from(bots)
-        .where(eq(bots.tenantId, tenantId));
+        .where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
     if (Number(botCount) >= plan.maxBots) {
         return c.json({ error: `Your ${plan.label} plan allows up to ${plan.maxBots} bot${plan.maxBots === 1 ? '' : 's'}. Upgrade to create more.` }, 403);
     }

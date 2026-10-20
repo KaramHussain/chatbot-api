@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { db, tenants, users, bots, botChunks, botDocuments, conversations } from '../db/index.js';
-import { eq, sql, and, gte, count } from 'drizzle-orm';
+import { eq, sql, and, gte, count, asc } from 'drizzle-orm';
 import type { HonoEnv } from '../types/index.js';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
 
@@ -46,7 +46,7 @@ router.get('/settings', async (c) => {
 
   if (!tenant) return c.json({ error: 'No tenant' }, 404);
 
-  const [{ total: botsUsed }] = await db.select({ total: count(bots.id) }).from(bots).where(eq(bots.tenantId, user.tenantId));
+  const [{ total: botsUsed }] = await db.select({ total: count(bots.id) }).from(bots).where(and(eq(bots.tenantId, user.tenantId), eq(bots.status, 'active')));
   const plan = isPlanId(tenant.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
 
   return c.json({ settings: { ...tenant, botsUsed: Number(botsUsed), maxBots: plan.maxBots } });
@@ -72,7 +72,26 @@ router.post('/plan', async (c) => {
     })
     .where(eq(tenants.id, user.tenantId));
 
-  return c.json({ success: true, plan: body.plan });
+  // Keep the oldest `maxBots` bots active for this plan; deactivate (don't delete) the rest.
+  // Re-syncing on every plan change also reactivates bots that a prior downgrade had switched off,
+  // in the same oldest-first order, if the new plan's limit allows it.
+  const tenantBots = await db
+    .select({ id: bots.id, status: bots.status })
+    .from(bots)
+    .where(eq(bots.tenantId, user.tenantId))
+    .orderBy(asc(bots.createdAt));
+
+  const toActivate = tenantBots.slice(0, config.maxBots).filter(b => b.status !== 'active').map(b => b.id);
+  const toDeactivate = tenantBots.slice(config.maxBots).filter(b => b.status === 'active').map(b => b.id);
+
+  for (const id of toActivate) {
+    await db.update(bots).set({ status: 'active', updatedAt: new Date() }).where(eq(bots.id, id));
+  }
+  for (const id of toDeactivate) {
+    await db.update(bots).set({ status: 'inactive', updatedAt: new Date() }).where(eq(bots.id, id));
+  }
+
+  return c.json({ success: true, plan: body.plan, deactivatedBots: toDeactivate.length });
 });
 
 // PATCH /api/account/settings — tenant can update their own session duration
