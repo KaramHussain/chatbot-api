@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { db, bots } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
-import { ttsSpeak, sttTranscribe } from '../lib/deepgram.js';
+import { ttsSpeak, sttTranscribe, grantToken } from '../lib/deepgram.js';
 
 const router = new Hono();
 
@@ -43,7 +43,25 @@ router.post('/tts', async (c) => {
   }
 });
 
-// POST /api/widget/stt — public. Body = raw audio (webm/ogg/wav). Returns { transcript }.
+// GET /api/widget/stt-token?botId= — public. Short-lived token for the browser to open
+// a live STT websocket directly to Deepgram (keeps the real key server-side).
+router.get('/stt-token', async (c) => {
+  const botId = (c.req.query('botId') ?? '').trim();
+  if (!botId) return c.json({ error: 'botId required' }, 400);
+  const bot = await activeVoiceBot(botId);
+  if (!bot) return c.json({ error: 'Bot not found' }, 404);
+  if (!bot.voiceEnabled) return c.json({ error: 'Voice is not enabled for this bot' }, 403);
+  try {
+    const { token, expiresIn } = await grantToken(60);
+    c.header('Cache-Control', 'no-store, max-age=0');
+    return c.json({ token, expiresIn });
+  } catch (err: any) {
+    console.error('STT token error:', err?.message ?? err);
+    return c.json({ error: 'Could not create token' }, 502);
+  }
+});
+
+// POST /api/widget/stt — public. Body = raw audio (webm/ogg/wav). Returns { transcript }. (fallback)
 router.post('/stt', async (c) => {
   const botId = (c.req.query('botId') ?? '').trim();
   if (!botId) return c.json({ error: 'botId required' }, 400);
