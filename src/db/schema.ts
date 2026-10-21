@@ -127,6 +127,9 @@ export const bots = pgTable('bots', {
   headerSubtext: text('header_subtext'),   // optional subtitle shown below bot name in header
   headerNameColor: text('header_name_color'), // null=auto contrast, or '#hex'
   headerBg: text('header_bg'),             // null=default gradient, 'transparent', or '#hex' solid
+  // Voice (text-in / speech-out). Only text is stored; TTS audio is streamed and discarded.
+  voiceEnabled: boolean('voice_enabled').default(false).notNull(),
+  voiceId: text('voice_id').default('Joanna').notNull(), // Amazon Polly voice id
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

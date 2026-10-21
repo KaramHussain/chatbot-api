@@ -9,6 +9,7 @@ import botsRouter from './bots.js';
 import documentsRouter from './documents.js';
 import chatRouter from './chat.js';
 import widgetRouter from './widget.js';
+import widgetTtsRouter from './widget-tts.js';
 import accountRouter from './account.js';
 import logosRouter from './logos.js';
 import tenantThemesRouter from './tenant-themes.js';
@@ -20,6 +21,7 @@ const api = new Hono<HonoEnv>();
 api.route('/auth', authRouter);
 api.route('/auth/register', registerRouter);
 api.route('/widget-config', widgetRouter);
+api.route('/widget', widgetTtsRouter);
 api.route('/chat', chatRouter);
 api.route('/logos', logosRouter);
 

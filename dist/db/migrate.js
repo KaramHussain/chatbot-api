@@ -27,5 +27,9 @@ console.log('Booking column ready.');
 // Draft bots: unfinished creations are saved as drafts
 await client `ALTER TYPE bot_status ADD VALUE IF NOT EXISTS 'draft'`;
 console.log('Draft bot status ready.');
+// Voice feature: per-bot text-to-speech (only text is stored, never audio)
+await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_enabled boolean DEFAULT false NOT NULL`;
+await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_id text DEFAULT 'Joanna' NOT NULL`;
+console.log('Voice columns ready.');
 await client.end();
 //# sourceMappingURL=migrate.js.map
