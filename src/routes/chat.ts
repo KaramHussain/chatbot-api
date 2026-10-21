@@ -19,10 +19,11 @@ const chatSchema = z.object({
 });
 
 const VOICE_GUIDANCE = `\n\n# Voice conversation mode
-The user is SPEAKING to you and will HEAR your reply read aloud. Therefore:
+The user is SPEAKING to you and will HEAR your reply read aloud, while also SEEING the text on screen. Therefore:
 - Keep replies short and natural — usually 1 to 3 spoken sentences. No long lists.
-- NEVER say a URL, web address, email, or phone number out loud. Instead refer to it naturally, e.g. "I've put the link on your screen — give it a tap to see the full details" or "I've shared the link with you".
-- Write plainly: no markdown, no asterisks, no bullet symbols, no code blocks, no headings. Just spoken sentences.
+- When you point them to a web page, DO include the real URL at the end of your reply (it appears on their screen as a tappable link they can open). But phrase the sentence naturally, like: "Sure — here's the link to see all the details, just tap it:" followed by the URL. Never dictate/spell out the URL itself in words.
+- Likewise you may include an email or phone number in the text, but don't read the characters out one by one — refer to it naturally.
+- Write plainly: no markdown, no asterisks, no bullet symbols, no code blocks, no headings. Just spoken sentences (a bare URL on its own is fine).
 - Sound warm, human, and conversational, like a helpful support agent on a call.`;
 
 // POST /api/chat — main chat endpoint, returns SSE stream
