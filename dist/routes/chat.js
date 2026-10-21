@@ -12,7 +12,14 @@ const chatSchema = z.object({
     message: z.string().min(1).max(4000),
     conversationId: z.string().uuid().optional(),
     visitorId: z.string().max(100).optional(),
+    voice: z.boolean().optional(), // message came from the voice orb → answer for the ear
 });
+const VOICE_GUIDANCE = `\n\n# Voice conversation mode
+The user is SPEAKING to you and will HEAR your reply read aloud. Therefore:
+- Keep replies short and natural — usually 1 to 3 spoken sentences. No long lists.
+- NEVER say a URL, web address, email, or phone number out loud. Instead refer to it naturally, e.g. "I've put the link on your screen — give it a tap to see the full details" or "I've shared the link with you".
+- Write plainly: no markdown, no asterisks, no bullet symbols, no code blocks, no headings. Just spoken sentences.
+- Sound warm, human, and conversational, like a helpful support agent on a call.`;
 // POST /api/chat — main chat endpoint, returns SSE stream
 // This route is PUBLIC — no auth middleware, but we enforce domain locking
 router.post('/', zValidator('json', chatSchema), async (c) => {
@@ -82,11 +89,13 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
         // Fall back to LLM-only chat — don't crash
     }
     // 6. Build system prompt with injected context
-    const systemPrompt = buildRagPrompt({
+    let systemPrompt = buildRagPrompt({
         botSystemPrompt: bot.systemPrompt,
         sources,
         responseStyle: bot.responseStyle,
     });
+    if (body.voice)
+        systemPrompt += VOICE_GUIDANCE;
     // 7. Save user message
     await db.insert(messages).values({
         conversationId,
