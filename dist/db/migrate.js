@@ -31,6 +31,9 @@ console.log('Draft bot status ready.');
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_enabled boolean DEFAULT false NOT NULL`;
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_id text DEFAULT 'Joanna' NOT NULL`;
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_intro text`;
+// Switched voice provider from Amazon Polly to Deepgram Aura — migrate old voice ids.
+await client `ALTER TABLE bots ALTER COLUMN voice_id SET DEFAULT 'aura-asteria-en'`;
+await client `UPDATE bots SET voice_id = 'aura-asteria-en' WHERE voice_id IS NULL OR voice_id NOT LIKE 'aura-%'`;
 console.log('Voice columns ready.');
 await client.end();
 //# sourceMappingURL=migrate.js.map
