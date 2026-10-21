@@ -7,9 +7,10 @@ const TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL ?? 'aura-2-thalia-en';
 const STT_MODEL = process.env.DEEPGRAM_STT_MODEL ?? 'nova-3';
 
 const AURA_VOICES = new Set([
-  'aura-2-thalia-en', 'aura-2-andromeda-en', 'aura-2-helena-en', 'aura-2-apollo-en',
-  'aura-2-arcas-en', 'aura-2-orion-en', 'aura-2-luna-en', 'aura-2-aurora-en',
-  'aura-2-athena-en', 'aura-2-hera-en', 'aura-2-zeus-en', 'aura-2-asteria-en',
+  'aura-2-thalia-en', 'aura-2-andromeda-en', 'aura-2-helena-en', 'aura-2-cora-en',
+  'aura-2-aurora-en', 'aura-2-luna-en', 'aura-2-apollo-en', 'aura-2-arcas-en',
+  'aura-2-jupiter-en', 'aura-2-zeus-en', 'aura-2-orion-en', 'aura-2-athena-en',
+  'aura-2-hera-en', 'aura-2-asteria-en',
 ]);
 
 function resolveVoice(voice?: string): string {

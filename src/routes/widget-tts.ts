@@ -31,8 +31,12 @@ router.post('/tts', async (c) => {
   if (!bot) return c.json({ error: 'Bot not found' }, 404);
   if (!bot.voiceEnabled) return c.json({ error: 'Voice is not enabled for this bot' }, 403);
 
+  // Optional voice override (used by the dashboard "Preview voice" so you can hear the
+  // dropdown selection before saving). Falls back to the bot's saved voice.
+  const voice = typeof (body as any).voice === 'string' ? (body as any).voice : bot.voiceId;
+
   try {
-    const audio = await ttsSpeak(text, bot.voiceId);
+    const audio = await ttsSpeak(text, voice);
     const ab = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
     c.header('Content-Type', 'audio/mpeg');
     c.header('Cache-Control', 'no-store, max-age=0');

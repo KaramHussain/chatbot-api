@@ -6,6 +6,7 @@ import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
 import { putObject, buildLogoKey } from '../lib/s3.js';
 import sharp from 'sharp';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
+import { ttsSpeak } from '../lib/deepgram.js';
 const router = new Hono();
 // GET /api/bots — list bots for current tenant
 router.get('/', async (c) => {
@@ -185,6 +186,30 @@ router.delete('/:id', async (c) => {
     if (!deleted)
         return c.json({ error: 'Not found' }, 404);
     return c.json({ success: true });
+});
+// POST /api/bots/:id/voice-preview — owner previews any voice (no save / voiceEnabled needed)
+router.post('/:id/voice-preview', async (c) => {
+    const tenantId = c.get('tenantId');
+    const { id } = c.req.param();
+    const [bot] = await db.select({ voiceId: bots.voiceId }).from(bots)
+        .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+    if (!bot)
+        return c.json({ error: 'Not found' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const text = (body.text ?? '').trim().slice(0, 500);
+    if (!text)
+        return c.json({ error: 'text required' }, 400);
+    try {
+        const audio = await ttsSpeak(text, body.voice || bot.voiceId);
+        const ab = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength);
+        c.header('Content-Type', 'audio/mpeg');
+        c.header('Cache-Control', 'no-store');
+        return c.body(ab);
+    }
+    catch (err) {
+        console.error('voice-preview error:', err?.message ?? err);
+        return c.json({ error: 'TTS failed' }, 502);
+    }
 });
 // DELETE /api/bots/:id/conversations — wipe this bot's chat history (messages cascade from conversations)
 router.delete('/:id/conversations', async (c) => {
