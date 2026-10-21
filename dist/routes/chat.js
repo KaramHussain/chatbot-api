@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { db, bots, conversations, messages, tenants } from '../db/index.js';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { retrieveContext, buildRagPrompt } from '../lib/rag.js';
 import { streamChat } from '../lib/bedrock.js';
@@ -69,13 +69,50 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
             .returning({ id: conversations.id });
         conversationId = newConv.id;
     }
-    // 4. Load recent history (last 10 messages for context window)
-    const history = await db
+    // 4. Load recent history — the LAST 10 messages (newest, then put back in chronological
+    // order). Ordering asc+limit returned the OLDEST 10, so long chats lost all recent context.
+    const recent = await db
         .select({ role: messages.role, content: messages.content })
         .from(messages)
         .where(eq(messages.conversationId, conversationId))
-        .orderBy(asc(messages.createdAt))
+        .orderBy(desc(messages.createdAt))
         .limit(10);
+    const history = recent.reverse();
+    // Bedrock Converse requires the first message to be from the user.
+    while (history.length && history[0].role !== 'user')
+        history.shift();
+    // 4b. Pull any lead details the visitor already shared so the bot knows who it's talking to.
+    let leadInfo = '';
+    if (body.conversationId) {
+        const [conv] = await db
+            .select({
+            name: conversations.visitorName,
+            email: conversations.visitorEmail,
+            phone: conversations.visitorPhone,
+            leadData: conversations.leadData,
+        })
+            .from(conversations)
+            .where(eq(conversations.id, conversationId))
+            .limit(1);
+        if (conv) {
+            const parts = [];
+            if (conv.name)
+                parts.push(`name is ${conv.name}`);
+            if (conv.email)
+                parts.push(`email is ${conv.email}`);
+            if (conv.phone)
+                parts.push(`phone is ${conv.phone}`);
+            if (conv.leadData && typeof conv.leadData === 'object') {
+                for (const [k, v] of Object.entries(conv.leadData)) {
+                    if (v)
+                        parts.push(`${k} is ${v}`);
+                }
+            }
+            if (parts.length) {
+                leadInfo = `\n\n# Visitor\nThe visitor's ${parts.join(', ')}. Address them by their first name naturally and don't ask again for details they've already given.`;
+            }
+        }
+    }
     // 5. RAG retrieval
     let sources = [];
     try {
@@ -95,6 +132,8 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
         sources,
         responseStyle: bot.responseStyle,
     });
+    if (leadInfo)
+        systemPrompt += leadInfo;
     if (body.voice)
         systemPrompt += VOICE_GUIDANCE;
     // 7. Save user message
@@ -149,7 +188,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
             await db
                 .update(conversations)
                 .set({
-                messageCount: history.length + 2, // +2 for user+assistant
+                messageCount: sql `${conversations.messageCount} + 2`, // +2 for this user+assistant turn
                 lastMessageAt: new Date(),
             })
                 .where(eq(conversations.id, conversationId));
