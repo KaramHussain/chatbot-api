@@ -113,6 +113,7 @@ export const bots = pgTable('bots', {
     // Voice (text-in / speech-out). Only text is stored; TTS audio is streamed and discarded.
     voiceEnabled: boolean('voice_enabled').default(false).notNull(),
     voiceId: text('voice_id').default('Joanna').notNull(), // Amazon Polly voice id
+    voiceIntro: text('voice_intro'), // what the orb says/greets when voice mode opens (null = default)
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

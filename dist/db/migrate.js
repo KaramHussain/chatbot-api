@@ -30,6 +30,7 @@ console.log('Draft bot status ready.');
 // Voice feature: per-bot text-to-speech (only text is stored, never audio)
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_enabled boolean DEFAULT false NOT NULL`;
 await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_id text DEFAULT 'Joanna' NOT NULL`;
+await client `ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_intro text`;
 console.log('Voice columns ready.');
 await client.end();
 //# sourceMappingURL=migrate.js.map

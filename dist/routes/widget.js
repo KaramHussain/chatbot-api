@@ -34,6 +34,7 @@ router.get('/:botId', async (c) => {
         headerBg: bots.headerBg,
         voiceEnabled: bots.voiceEnabled,
         voiceId: bots.voiceId,
+        voiceIntro: bots.voiceIntro,
         sessionDurationMinutes: tenants.sessionDurationMinutes,
     })
         .from(bots)
