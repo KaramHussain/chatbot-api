@@ -31,8 +31,8 @@ function resolveVoice(voice?: string): string {
   return TTS_MODEL;
 }
 
-// Slightly faster than default (1.0) for a snappier, more natural pace — "a little bit".
-const TTS_SPEED = process.env.DEEPGRAM_TTS_SPEED ?? '1.12';
+// Normal speaking pace (1.0). Override via env if ever needed.
+const TTS_SPEED = process.env.DEEPGRAM_TTS_SPEED ?? '1.0';
 
 /** Text → MP3 bytes via Deepgram Aura-2. */
 export async function ttsSpeak(text: string, voice?: string): Promise<Buffer> {
