@@ -31,11 +31,14 @@ function resolveVoice(voice?: string): string {
   return TTS_MODEL;
 }
 
+// Slightly faster than default (1.0) for a snappier, more natural pace — "a little bit".
+const TTS_SPEED = process.env.DEEPGRAM_TTS_SPEED ?? '1.12';
+
 /** Text → MP3 bytes via Deepgram Aura-2. */
 export async function ttsSpeak(text: string, voice?: string): Promise<Buffer> {
   if (!KEY) throw new Error('DEEPGRAM_API_KEY not set');
   const model = resolveVoice(voice);
-  const res = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3`, {
+  const res = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3&speed=${TTS_SPEED}`, {
     method: 'POST',
     headers: { Authorization: `Token ${KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
