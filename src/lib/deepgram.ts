@@ -17,7 +17,8 @@ const AURA_VOICES = new Set([
   'aura-2-theia-en', 'aura-2-hyperion-en', 'aura-2-janus-en', 'aura-2-cordelia-en',
   'aura-2-vesta-en', 'aura-2-minerva-en', 'aura-2-odysseus-en', 'aura-2-harmonia-en',
   'aura-2-juno-en', 'aura-2-selene-en', 'aura-2-amalthea-en', 'aura-2-atlas-en',
-  'aura-2-orpheus-en',
+  'aura-2-orpheus-en', 'aura-2-delia-en', 'aura-2-electra-en', 'aura-2-neptune-en',
+  'aura-2-ophelia-en',
 ]);
 
 function resolveVoice(voice?: string): string {
