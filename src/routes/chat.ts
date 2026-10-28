@@ -5,6 +5,7 @@ import { db, conversations, messages } from '../db/index.js';
 import { eq, asc } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { streamChat } from '../lib/bedrock.js';
+import { Stopwatch } from '../lib/stopwatch.js';
 import {
   addTenantTokens,
   buildSystemPrompt,
@@ -38,8 +39,10 @@ const chatSchema = z.object({
 router.post('/', zValidator('json', chatSchema), async (c) => {
   const body = c.req.valid('json');
   const origin = c.req.header('Origin') ?? c.req.header('Referer') ?? '';
+  const timing = new Stopwatch();
 
   const bot = await getActiveBot(body.botId);
+  timing.mark('bot');
   if (!bot) return c.json({ error: 'Bot not found or inactive' }, 404);
   if (!isOriginAllowed(bot, origin)) return c.json({ error: 'Origin not allowed' }, 403);
 
@@ -56,6 +59,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
     conversationId: existingConversationId,
     visitorId: body.visitorId,
   });
+  timing.mark('setup');
 
   // History must be read BEFORE this turn's user message is saved, otherwise the new message can
   // appear in the history as well (two user turns in a row). Saving is chained after the read but
@@ -64,11 +68,13 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   const [history, visitorContext, sources] = await Promise.all([
     historyP,
     existingConversationId ? loadVisitorContext(conversationId) : Promise.resolve(''),
-    searchKnowledge(bot, body.message),
+    searchKnowledge(bot, body.message).finally(() => timing.mark('rag')),
     historyP.then(() => saveMessage(conversationId, { role: 'user', content: body.message })),
   ]);
+  timing.mark('context');
 
   const systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });
+  const modelId = resolveModelId(bot, tenant);
 
   // Stream response via SSE
   return streamSSE(c, async (stream) => {
@@ -86,11 +92,12 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
         systemPrompt,
         history,
         userMessage: body.message,
-        modelId: resolveModelId(bot, tenant),
+        modelId,
         onTokenUsage: (inp, out) => { inputTokens = inp; outputTokens = out; },
       });
 
       for await (const chunk of chatStream) {
+        if (!fullResponse) timing.mark('firstToken');
         fullResponse += chunk;
         await stream.writeSSE({
           data: JSON.stringify({ type: 'chunk', text: chunk }),
@@ -104,6 +111,9 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
           sources: sources.map((s) => ({ documentName: s.documentName, score: s.score })),
         }),
       });
+      timing.mark('done');
+      // One structured line per request, so latency can be diagnosed from the logs.
+      console.log(JSON.stringify({ evt: 'chat_timing', botId: bot.id, model: modelId ?? 'default', voice: !!body.voice, ...timing.toJSON() }));
 
       await Promise.all([
         saveMessage(conversationId, {
