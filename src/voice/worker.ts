@@ -12,6 +12,11 @@ const cfg = getVoiceConfig();
 // it forks, which inherit this env) must use the internal loopback URL instead.
 process.env.LIVEKIT_URL = cfg.internalUrl;
 
+// The SDK preloads a local audio end-of-turn model (~250 MB RAM) whenever its native add-on is
+// installed. We detect turns with Deepgram (turnDetection: 'stt'), so that model is never used —
+// skip loading it to keep memory for the APIs on this small host.
+process.env.LIVEKIT_AGENTS_PRELOAD_LOCAL_INFERENCE ??= 'false';
+
 cli.runApp(
   new ServerOptions({
     agent: fileURLToPath(new URL('./agent.js', import.meta.url)),
