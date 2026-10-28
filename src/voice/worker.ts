@@ -7,6 +7,11 @@ import { getVoiceConfig } from './config.js';
 
 const cfg = getVoiceConfig();
 
+// The agents CLI resolves the server URL as `--url`/LIVEKIT_URL first, overriding `wsURL` below.
+// In our env LIVEKIT_URL is the PUBLIC url handed to browsers; this worker (and the job processes
+// it forks, which inherit this env) must use the internal loopback URL instead.
+process.env.LIVEKIT_URL = cfg.internalUrl;
+
 cli.runApp(
   new ServerOptions({
     agent: fileURLToPath(new URL('./agent.js', import.meta.url)),
