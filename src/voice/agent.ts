@@ -19,7 +19,7 @@ import {
 } from '../lib/conversation.js';
 import { resolveVoice } from '../lib/deepgram.js';
 import { BedrockRagLLM, type VoiceBrain } from './bedrock-rag-llm.js';
-import { TURN_TUNING } from './config.js';
+import { REPLY_TOPIC, TURN_TUNING } from './config.js';
 import { decodeJobMetadata } from './session.js';
 import { speakableText } from './speech-text.js';
 import { TranscriptRecorder } from './transcript-recorder.js';
@@ -96,7 +96,15 @@ export default defineAgent<ProcData>({
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (ev) => {
       const item = ev.item;
       if (item.type !== 'message' || (item.role !== 'user' && item.role !== 'assistant')) return;
-      recorder.record(item.role, item.textContent ?? '');
+      const text = item.textContent ?? '';
+      recorder.record(item.role, text);
+      // Hand the widget the complete committed reply — links included. The live captions are paced
+      // to speech and can't be relied on to carry an unspoken link at the end of a reply.
+      if (item.role === 'assistant' && text.trim()) {
+        ctx.room.localParticipant
+          ?.sendText(text, { topic: REPLY_TOPIC })
+          .catch((err) => logger.warn({ err }, 'failed to send committed reply to widget'));
+      }
     });
     session.on(voice.AgentSessionEventTypes.Error, (ev) => logger.error({ err: ev.error }, 'voice session error'));
     ctx.addShutdownCallback(() => recorder.flush());

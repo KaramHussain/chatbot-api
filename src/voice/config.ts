@@ -14,6 +14,13 @@ export interface VoiceConfig {
 
 export const VOICE_AGENT_NAME_DEFAULT = 'cloudgeniee-voice';
 
+/**
+ * Text-stream topic carrying each COMMITTED agent reply (full text, links included) to the widget,
+ * which uses it for the chat history and the "Open the link" button. Must match the widget's
+ * `REPLY_TOPIC` in src/frame/voice/VoiceSession.ts.
+ */
+export const REPLY_TOPIC = 'cg.reply';
+
 /** How long a widget join token stays valid. Only gates joining; the call itself can run longer. */
 export const JOIN_TOKEN_TTL = '15m';
 
