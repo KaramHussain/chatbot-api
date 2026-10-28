@@ -19,12 +19,13 @@ export const JOIN_TOKEN_TTL = '15m';
 
 /**
  * Turn-taking tuning. Deepgram decides the user stopped talking after `sttEndpointingMs` of
- * silence, then the agent waits `minEndpointingDelayMs` more before replying — together ~0.8s,
- * long enough not to cut people off on a breath, short enough to feel responsive.
+ * silence, then the agent waits `minEndpointingDelayMs` more before replying — together ~0.5s
+ * (product decision: snappy replies). Shorter means a mid-sentence pause may end the turn; if the
+ * user keeps talking, the interruption handling stops the reply and listens again.
  */
 export const TURN_TUNING = {
-  sttEndpointingMs: 300,
-  minEndpointingDelayMs: 500,
+  sttEndpointingMs: 200,
+  minEndpointingDelayMs: 300,
   maxEndpointingDelayMs: 3000,
   /** Speech shorter than this while the agent talks is not treated as an interruption. */
   minInterruptionMs: 500,
