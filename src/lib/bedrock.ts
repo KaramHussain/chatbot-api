@@ -43,22 +43,35 @@ export interface StreamChatOptions {
   userMessage: string;
   modelId?: string;
   onTokenUsage?: (inputTokens: number, outputTokens: number) => void;
+  /** Aborts the Bedrock request (e.g. the user interrupted the voice agent). */
+  signal?: AbortSignal;
+}
+
+/**
+ * Bedrock Converse requires a conversation that starts with the user and strictly alternates
+ * user/assistant. Stored history can violate that (e.g. a reply that failed left two user turns in
+ * a row), which makes Bedrock reject the whole request — so normalise defensively: drop empty
+ * turns, drop leading assistant turns, and merge consecutive same-role turns.
+ */
+export function toConverseMessages(history: ChatMessage[], userMessage: string): BedrockMessage[] {
+  const turns: ChatMessage[] = [];
+  for (const m of [...history, { role: 'user' as const, content: userMessage }]) {
+    const content = m.content.trim();
+    if (!content) continue;
+    if (!turns.length && m.role !== 'user') continue;
+    const last = turns[turns.length - 1];
+    if (last && last.role === m.role) last.content = `${last.content}\n\n${content}`;
+    else turns.push({ role: m.role, content });
+  }
+  return turns.map((m) => ({ role: m.role, content: [{ text: m.content }] }));
 }
 
 // Yields text delta chunks as strings; call this inside an SSE handler
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<string> {
-  const { systemPrompt, history, userMessage, modelId = LLM_MODEL, onTokenUsage } = options;
+  const { systemPrompt, history, userMessage, modelId = LLM_MODEL, onTokenUsage, signal } = options;
 
-  const messages: BedrockMessage[] = [
-    ...history.map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: [{ text: m.content }],
-    })),
-    {
-      role: 'user' as const,
-      content: [{ text: userMessage }],
-    },
-  ];
+  const messages = toConverseMessages(history, userMessage);
+  if (!messages.length) return;
 
   const system = systemPrompt
     ? [{ text: systemPrompt }]
@@ -73,7 +86,8 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
         maxTokens: 2048,
         temperature: 0.2,
       },
-    })
+    }),
+    { abortSignal: signal },
   );
 
   if (!response.stream) return;

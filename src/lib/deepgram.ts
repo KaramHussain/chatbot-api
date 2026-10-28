@@ -21,7 +21,8 @@ const AURA_VOICES = new Set([
   'aura-2-ophelia-en',
 ]);
 
-function resolveVoice(voice?: string): string {
+/** Maps a stored bot voice id to a valid Aura-2 model (unknown/legacy ids → default). */
+export function resolveVoice(voice?: string): string {
   if (voice && AURA_VOICES.has(voice)) return voice;
   // migrate old Aura-v1 ids like "aura-asteria-en" → closest Aura-2
   if (voice && voice.startsWith('aura-') && !voice.startsWith('aura-2-')) {
