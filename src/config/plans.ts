@@ -36,7 +36,7 @@ export const PLAN_CONFIG: Record<PlanId, {
     maxBots: 10,
     monthlyMessageLimit: 10000,
     monthlyTokenBudget: 20_000_000,
-    aiModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    aiModel: 'mistral.mistral-large-3-675b-instruct',
     leadCaptureAllowed: true,
     brandingRemovable: true,
   },
