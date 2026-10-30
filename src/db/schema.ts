@@ -53,7 +53,7 @@ export const tenants = pgTable('tenants', {
   monthlyMessageLimit: integer('monthly_message_limit').default(1000).notNull(),
   messagesThisMonth: integer('messages_this_month').default(0).notNull(),
   billingResetAt: timestamp('billing_reset_at'),
-  aiModel: text('ai_model').default('amazon.nova-pro-v1:0'),
+  aiModel: text('ai_model').default('us.amazon.nova-2-lite-v1:0'),
   monthlyTokenBudget: integer('monthly_token_budget').default(0).notNull(),
   tokensUsedThisMonth: integer('tokens_used_this_month').default(0).notNull(),
   tokenBudgetResetAt: timestamp('token_budget_reset_at'),

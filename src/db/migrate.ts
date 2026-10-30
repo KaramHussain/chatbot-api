@@ -44,9 +44,20 @@ await client`ALTER TABLE bots ALTER COLUMN voice_id SET DEFAULT 'aura-2-thalia-e
 await client`UPDATE bots SET voice_id = 'aura-2-thalia-en' WHERE voice_id IS NULL OR voice_id NOT LIKE 'aura-2-%'`;
 console.log('Voice columns ready.');
 
-// Premium (Business) model: Mistral Large 3 → Claude Opus 4.5.
-await client`UPDATE tenants SET ai_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0' WHERE ai_model = 'mistral.mistral-large-3-675b-instruct'`;
-await client`UPDATE bots SET llm_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0' WHERE llm_model = 'mistral.mistral-large-3-675b-instruct'`;
-console.log('Premium model ready.');
+// Plan models (Oct 31 2026): Free = Nova 2 Lite, Growth = Mistral Large 3, Business = Claude Haiku 4.5.
+// Tenants still on a previous plan default move to their plan's model; custom admin picks are kept.
+await client`ALTER TABLE tenants ALTER COLUMN ai_model SET DEFAULT 'us.amazon.nova-2-lite-v1:0'`;
+await client`
+  UPDATE tenants SET ai_model = CASE plan
+    WHEN 'starter' THEN 'us.amazon.nova-2-lite-v1:0'
+    WHEN 'growth' THEN 'mistral.mistral-large-3-675b-instruct'
+    WHEN 'enterprise' THEN 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+  END
+  WHERE ai_model IS NULL OR ai_model IN (
+    'amazon.nova-lite-v1:0', 'amazon.nova-pro-v1:0',
+    'mistral.mistral-large-3-675b-instruct', 'us.anthropic.claude-opus-4-5-20251101-v1:0'
+  )`;
+await client`UPDATE bots SET llm_model = NULL WHERE llm_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0'`;
+console.log('Plan models ready.');
 
 await client.end();

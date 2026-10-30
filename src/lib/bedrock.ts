@@ -8,7 +8,7 @@ import { bedrockAwsConfig } from './aws.js';
 
 const client = new BedrockRuntimeClient(bedrockAwsConfig);
 
-const LLM_MODEL = process.env.BEDROCK_LLM_MODEL ?? 'amazon.nova-lite-v1:0';
+const LLM_MODEL = process.env.BEDROCK_LLM_MODEL ?? 'us.amazon.nova-2-lite-v1:0';
 const EMBED_MODEL = process.env.BEDROCK_EMBEDDING_MODEL ?? 'amazon.titan-embed-text-v2:0';
 const EMBED_DIMS = parseInt(process.env.BEDROCK_EMBEDDING_DIMENSIONS ?? '1024');
 
@@ -66,6 +66,32 @@ export function toConverseMessages(history: ChatMessage[], userMessage: string):
   return turns.map((m) => ({ role: m.role, content: [{ text: m.content }] }));
 }
 
+/**
+ * Model used when a plan's model is not available to the AWS account — e.g. a Claude model whose
+ * AWS Marketplace subscription hasn't completed — so a chat never fails because of model access.
+ */
+const FALLBACK_MODEL = 'mistral.mistral-large-3-675b-instruct';
+/** After a denial, skip the denied model for this long (avoids a wasted round-trip per message). */
+const DENIED_RETRY_MS = 5 * 60_000;
+const deniedUntil = new Map<string, number>();
+
+type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
+
+async function openConverseStream(modelId: string, input: ConverseStreamInput, signal?: AbortSignal) {
+  if (modelId !== FALLBACK_MODEL && (deniedUntil.get(modelId) ?? 0) <= Date.now()) {
+    try {
+      return await client.send(new ConverseStreamCommand({ ...input, modelId }), { abortSignal: signal });
+    } catch (err) {
+      if ((err as Error).name !== 'AccessDeniedException') throw err;
+      deniedUntil.set(modelId, Date.now() + DENIED_RETRY_MS);
+      console.warn(JSON.stringify({
+        evt: 'model_fallback', modelId, fallback: FALLBACK_MODEL, reason: (err as Error).message.slice(0, 160),
+      }));
+    }
+  }
+  return client.send(new ConverseStreamCommand({ ...input, modelId: FALLBACK_MODEL }), { abortSignal: signal });
+}
+
 // Yields text delta chunks as strings; call this inside an SSE handler
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<string> {
   const { systemPrompt, history, userMessage, modelId = LLM_MODEL, onTokenUsage, signal } = options;
@@ -77,18 +103,14 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
     ? [{ text: systemPrompt }]
     : undefined;
 
-  const response = await client.send(
-    new ConverseStreamCommand({
-      modelId,
-      messages,
-      system,
-      inferenceConfig: {
-        maxTokens: 2048,
-        temperature: 0.2,
-      },
-    }),
-    { abortSignal: signal },
-  );
+  const response = await openConverseStream(modelId, {
+    messages,
+    system,
+    inferenceConfig: {
+      maxTokens: 2048,
+      temperature: 0.2,
+    },
+  }, signal);
 
   if (!response.stream) return;
 
