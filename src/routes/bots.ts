@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
+import { jsonBody } from '../lib/validation.js';
 import { z } from 'zod';
 import { db, bots, botChunks, botDocuments, conversations, messages, tenants } from '../db/index.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
@@ -52,7 +52,7 @@ const createBotSchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   welcomeMessage: z.string().max(500).optional(),
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-  systemPrompt: z.string().max(2000).nullable().optional(),
+  systemPrompt: z.string().max(4000).nullable().optional(),
   allowedOrigins: z.array(z.string().url()).default([]),
   leadCaptureEnabled: z.boolean().default(false),
   leadCaptureMessage: z.string().max(300).optional(),
@@ -79,7 +79,7 @@ const createBotSchema = z.object({
   headerBg: z.string().nullable().optional(),
 });
 
-router.post('/', zValidator('json', createBotSchema), async (c) => {
+router.post('/', jsonBody(createBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const body = c.req.valid('json');
 
@@ -124,7 +124,7 @@ const updateBotSchema = z.object({
   displayName: z.string().max(100).nullable().optional(),
   welcomeMessage: z.string().max(500).optional(),
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-  systemPrompt: z.string().max(2000).nullable().optional(),
+  systemPrompt: z.string().max(4000).nullable().optional(),
   allowedOrigins: z.array(z.string()).optional(),
   status: z.enum(['active', 'inactive', 'draft']).optional(),
   leadCaptureEnabled: z.boolean().optional(),
@@ -158,7 +158,7 @@ const updateBotSchema = z.object({
   headerBg: z.string().nullable().optional(),
 });
 
-router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
+router.put('/:id', jsonBody(updateBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const { id } = c.req.param();
   const body = c.req.valid('json');
