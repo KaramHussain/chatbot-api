@@ -44,4 +44,9 @@ await client`ALTER TABLE bots ALTER COLUMN voice_id SET DEFAULT 'aura-2-thalia-e
 await client`UPDATE bots SET voice_id = 'aura-2-thalia-en' WHERE voice_id IS NULL OR voice_id NOT LIKE 'aura-2-%'`;
 console.log('Voice columns ready.');
 
+// Premium (Business) model: Mistral Large 3 → Claude Opus 4.5.
+await client`UPDATE tenants SET ai_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0' WHERE ai_model = 'mistral.mistral-large-3-675b-instruct'`;
+await client`UPDATE bots SET llm_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0' WHERE llm_model = 'mistral.mistral-large-3-675b-instruct'`;
+console.log('Premium model ready.');
+
 await client.end();
