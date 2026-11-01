@@ -5,6 +5,7 @@ import { logger } from 'hono/logger';
 import { HTTPException } from 'hono/http-exception';
 import apiRoutes from './routes/index.js';
 import bookingPages from './booking/pages/router.js';
+import { startBookingWorker } from './booking/runner.js';
 
 const app = new Hono();
 
@@ -44,6 +45,8 @@ app.onError((err, c) => {
 const PORT = parseInt(process.env.API_PORT ?? process.env.PORT ?? '3001');
 
 serve({ fetch: app.fetch, port: PORT }, (info) => {
+  // Booking emails/reminders run in this process unless a separate worker is configured.
+  if (process.env.BOOKING_WORKER !== 'external') startBookingWorker();
   console.log(`CloudGeniee API running on http://localhost:${info.port}`);
   console.log(`Environment: ${process.env.NODE_ENV ?? 'development'}`);
 });
