@@ -5,6 +5,7 @@ dotenvConfig();
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { BOOKING_DDL } from '../booking/ddl.js';
 
 const client = postgres(process.env.DATABASE_URL!, { max: 1 });
 const db = drizzle(client);
@@ -62,5 +63,9 @@ await client`UPDATE bots SET llm_model = NULL WHERE llm_model = 'us.anthropic.cl
 await client`UPDATE tenants SET ai_model = 'mistral.mistral-large-3-675b-instruct' WHERE ai_model = 'us.anthropic.claude-haiku-4-5-20251001-v1:0'`;
 await client`UPDATE bots SET llm_model = NULL WHERE llm_model LIKE '%anthropic.claude%'`;
 console.log('Plan models ready.');
+
+// Bookings feature (idempotent DDL)
+for (const stmt of BOOKING_DDL) await client.unsafe(stmt);
+console.log('Booking tables ready.');
 
 await client.end();

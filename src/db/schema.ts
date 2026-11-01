@@ -59,6 +59,8 @@ export const tenants = pgTable('tenants', {
   tokenBudgetResetAt: timestamp('token_budget_reset_at'),
   sessionDurationMinutes: integer('session_duration_minutes').default(1440).notNull(),
   maxUploadMb: integer('max_upload_mb'),
+  // Per-tenant feature switches that override the plan default, e.g. { booking: true }
+  featureOverrides: jsonb('feature_overrides').$type<Record<string, boolean>>().default({}).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -188,6 +190,7 @@ export const conversations = pgTable('conversations', {
   visitorName: text('visitor_name'),
   visitorPhone: text('visitor_phone'),
   leadData: jsonb('lead_data').default({}).notNull(),
+  verifiedEmail: text('verified_email'),            // set only by the booking OTP flow
   messageCount: integer('message_count').default(0).notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
   lastMessageAt: timestamp('last_message_at').defaultNow().notNull(),

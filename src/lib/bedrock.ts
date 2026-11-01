@@ -1,6 +1,7 @@
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
+  ConverseCommand,
   ConverseStreamCommand,
   type Message as BedrockMessage,
 } from '@aws-sdk/client-bedrock-runtime';
@@ -125,4 +126,24 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
       );
     }
   }
+}
+
+/**
+ * One-shot, non-streaming completion for background jobs (e.g. summarising a conversation).
+ * Uses the cheapest fast model by default; never use it on the live chat path.
+ */
+export async function completeText(opts: {
+  system: string;
+  user: string;
+  modelId?: string;
+  maxTokens?: number;
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const res = await client.send(new ConverseCommand({
+    modelId: opts.modelId ?? 'us.amazon.nova-2-lite-v1:0',
+    system: [{ text: opts.system }],
+    messages: [{ role: 'user', content: [{ text: opts.user }] }],
+    inferenceConfig: { maxTokens: opts.maxTokens ?? 400, temperature: 0.1 },
+  }));
+  const text = (res.output?.message?.content ?? []).map((b) => b.text ?? '').join('').trim();
+  return { text, inputTokens: res.usage?.inputTokens ?? 0, outputTokens: res.usage?.outputTokens ?? 0 };
 }

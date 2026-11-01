@@ -9,6 +9,7 @@ export const PLAN_CONFIG: Record<PlanId, {
   aiModel: string;
   leadCaptureAllowed: boolean;
   brandingRemovable: boolean;
+  features: { booking: boolean };
 }> = {
   starter: {
     label: 'Free',
@@ -19,6 +20,7 @@ export const PLAN_CONFIG: Record<PlanId, {
     aiModel: 'us.amazon.nova-2-lite-v1:0',
     leadCaptureAllowed: false,
     brandingRemovable: false,
+    features: { booking: false },
   },
   growth: {
     label: 'Growth',
@@ -29,6 +31,7 @@ export const PLAN_CONFIG: Record<PlanId, {
     aiModel: 'mistral.mistral-large-3-675b-instruct',
     leadCaptureAllowed: true,
     brandingRemovable: true,
+    features: { booking: true },
   },
   enterprise: {
     label: 'Business',
@@ -39,8 +42,11 @@ export const PLAN_CONFIG: Record<PlanId, {
     aiModel: 'mistral.mistral-large-3-675b-instruct',
     leadCaptureAllowed: true,
     brandingRemovable: true,
+    features: { booking: true },
   },
 };
+
+export type FeatureId = keyof (typeof PLAN_CONFIG)['starter']['features'];
 
 export function isPlanId(value: unknown): value is PlanId {
   return value === 'starter' || value === 'growth' || value === 'enterprise';
