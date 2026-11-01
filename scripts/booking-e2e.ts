@@ -37,7 +37,12 @@ async function turn(message: string, pickSlot?: { start: string; typeName?: stri
 }
 
 console.log(`bot ${bot.id}  type ${type.id}  model ${MODEL ?? 'tenant default'}`);
-await turn('Hi, I would like to book a consultation please');
+// Ask-first flow: preference -> exact answer -> unsure -> full week -> pick
+await turn('Hi, I would like to book a consultation please');            // expect: asks for a day/time, NO times yet
+await turn('Do you have anything on Tuesday afternoon?');                  // expect: slots card for Tuesday afternoon
+await turn('Is 3 pm free on any day other than Monday?');                  // expect: yes/no answer for 3 pm, card
+await turn("Hmm, I'm not sure, I'm flexible");                              // expect: offers the full week
+await turn('yes');                                                          // expect: full-week card
 const first = lastSlots[1] ?? lastSlots[0];
 if (!first) throw new Error('no slots were offered');
 await turn(`${first.dayLabel}, ${first.timeLabel}`, { start: first.start, typeName: type.name });

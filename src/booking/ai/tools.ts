@@ -8,11 +8,11 @@ import type { Bot } from '../../lib/conversation.js';
 import { BookingError, getMeetingType, listActiveTypes, type Booking, type BookingSettings, type MeetingType } from '../core.js';
 import { bookings } from '../schema.js';
 import {
-  bookingsForEmail, cancelBooking, confirmBooking, hasAnyAvailability, holdSlot, listSlots, rescheduleBooking, suggestedSlots,
+  bookingsForEmail, cancelBooking, confirmBooking, hasAnyAvailability, holdSlot, listSlots, rescheduleBooking,
 } from '../service.js';
 import { requestOtp, verifiedEmailOf, verifyOtpForConversation } from '../otp.js';
 import { signManageToken, normalizeEmail } from '../tokens.js';
-import { formatDateTime, formatDay, formatTime, zoneAbbreviation, type TimeFormat } from '../time.js';
+import { formatDateTime, formatDay, formatTime, localDate, zoneAbbreviation, type TimeFormat } from '../time.js';
 import { googleCalendarUrl, outlookCalendarUrl } from '../notify/calendar-links.js';
 import { bookBase, manageUrl } from '../notify/notifier.js';
 import type { EmitUi, SlotChoice } from './ui-events.js';
@@ -38,13 +38,18 @@ export function bookingToolSpecs(): ToolSpec[] {
   return [
     spec('list_meeting_types', 'List what the visitor can book (names, durations, descriptions, the questions each one asks).'),
     spec('find_available_slots',
-      'Find REAL open times. ALWAYS call this before stating or implying any availability. The times are shown to the visitor as tappable buttons.',
+      'Find REAL open times and show them to the visitor as tappable buttons. ALWAYS call this before stating or implying any availability. Pass exactly what the visitor asked for (a day, a time, a time range, "other than Monday"...). The result says whether a requested time is available.',
       {
         meeting_type: str('Name of the meeting type (omit if there is only one).'),
-        from_date: str('Earliest day to search, YYYY-MM-DD in the visitor\'s time zone. Default: today.'),
-        to_date: str('Latest day, YYYY-MM-DD. Default: two weeks after from_date.'),
-        part_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening'], description: 'Visitor preference.' },
+        from_date: str('Earliest day, YYYY-MM-DD in the visitor\'s time zone. Default: today.'),
+        to_date: str('Latest day, YYYY-MM-DD. For one specific day set from_date and to_date to that day.'),
         weekday: str('Only this weekday, e.g. "friday".'),
+        exclude_weekday: str('Skip this weekday, e.g. "monday" for "any day other than Monday".'),
+        time: str('A specific time the visitor wants, 24-hour HH:mm (e.g. "15:00" for 3 pm). The result says whether it is available and offers the closest times if not.'),
+        time_from: str('Start of a time range, 24-hour HH:mm.'),
+        time_to: str('End of a time range, 24-hour HH:mm.'),
+        part_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening'], description: 'Visitor preference.' },
+        full_week: { type: 'boolean', description: 'true = every open time for the next 7 days (only after the visitor said yes to seeing the full week).' },
         earliest: { type: 'boolean', description: 'true = just the soonest few times.' },
       }),
     spec('hold_slot', 'Reserve a time for 10 minutes while collecting details. Use the exact `start` from the latest find_available_slots result.',
@@ -98,6 +103,25 @@ export async function savedDetails(conversationId: string): Promise<SavedDetails
     .from(conversations).where(eq(conversations.id, conversationId)).limit(1);
   const lead = (c?.lead ?? {}) as { bookingAnswers?: Record<string, string>; summaryHoldId?: string };
   return { name: c?.name ?? null, email: c?.email ?? null, phone: c?.phone ?? null, answers: lead.bookingAnswers ?? {}, summaryHoldId: lead.summaryHoldId ?? null };
+}
+
+/** "15:00", "3pm", "3:30 pm", "15" -> minutes after midnight. */
+function toMinutes(v: unknown): number | null {
+  if (typeof v !== 'string') return null;
+  const m = v.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] ?? 0);
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  return h > 23 || min > 59 ? null : h * 60 + min;
+}
+
+/** Merge small bits of booking state into the conversation (lead_data JSON). */
+async function remember(conversationId: string, patch: Record<string, unknown>) {
+  await db.update(conversations)
+    .set({ leadData: sql`coalesce(${conversations.leadData}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb` })
+    .where(eq(conversations.id, conversationId));
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -160,43 +184,84 @@ export function createToolRunner(ctx: ToolContext): ToolRunner {
     async find_available_slots(input) {
       if (++searches > 3) return { error: 'Too many searches this turn — answer with what you have.' };
       const type = await resolveType(ctx, input.meeting_type as string | undefined);
+      await remember(ctx.conversationId, { lastTypeName: type.name }); // lets "yes, send the full week" know which meeting
+
       const now = new Date();
       const day = (v: unknown) => {
         const d = typeof v === 'string' ? DateTime.fromISO(v, { zone: tz }) : null;
         return d?.isValid ? d.startOf('day') : null;
       };
+      const fullWeek = input.full_week === true;
       const fromDay = day(input.from_date);
       const from = fromDay && fromDay.toJSDate() > now ? fromDay.toJSDate() : now;
       const toDay = day(input.to_date);
-      const to = toDay ? toDay.endOf('day').toJSDate() : new Date((fromDay ?? DateTime.fromJSDate(now, { zone: tz })).toJSDate().getTime() + 14 * 86400_000);
-      const weekdayRaw = typeof input.weekday === 'string' ? WEEKDAYS[input.weekday.toLowerCase()] : undefined;
-      const sameDay = !!toDay && !!fromDay && toDay.hasSame(fromDay, 'day');
+      const to = toDay ? toDay.endOf('day').toJSDate() : DateTime.fromJSDate(from, { zone: tz }).startOf('day').plus({ days: fullWeek ? 7 : 14 }).toJSDate();
+      const weekday = typeof input.weekday === 'string' ? WEEKDAYS[input.weekday.toLowerCase()] : undefined;
+      const exWeekday = typeof input.exclude_weekday === 'string' ? WEEKDAYS[input.exclude_weekday.toLowerCase()] : undefined;
       const partOfDay = ['morning', 'afternoon', 'evening'].includes(String(input.part_of_day)) ? (input.part_of_day as 'morning' | 'afternoon' | 'evening') : undefined;
+      const wantTime = toMinutes(input.time);
+      const rangeFrom = toMinutes(input.time_from);
+      const rangeTo = toMinutes(input.time_to);
+      const mins = (d: Date) => { const l = DateTime.fromJSDate(d, { zone: tz }); return l.hour * 60 + l.minute; };
 
-      const found = await suggestedSlots({ botId: ctx.bot.id, typeId: type.id, from, to, zone: tz, partOfDay, weekday: weekdayRaw }, 3, 3);
-      const picked = input.earliest === true ? found.slots.slice(0, 3) : sameDay ? found.slots.slice(0, 8) : found.suggested;
+      let slots = (await listSlots({ botId: ctx.bot.id, typeId: type.id, from, to, zone: tz, partOfDay, weekday })).slots;
+      if (exWeekday) slots = slots.filter((x) => DateTime.fromJSDate(x.start, { zone: tz }).weekday !== exWeekday);
+      if (rangeFrom !== null) slots = slots.filter((x) => mins(x.start) >= rangeFrom && (rangeTo === null || mins(x.start) < rangeTo));
 
-      if (!picked.length) {
+      // A specific time: show it where it's free; where it isn't, the closest time each day — and say which.
+      let exact: boolean | undefined;
+      let shown = slots;
+      if (wantTime !== null) {
+        const matches = slots.filter((x) => mins(x.start) === wantTime);
+        exact = matches.length > 0;
+        if (exact) shown = matches;
+        else {
+          const closest = new Map<string, (typeof slots)[number]>();
+          for (const x of slots) {
+            const k = localDate(x.start, tz);
+            const cur = closest.get(k);
+            if (!cur || Math.abs(mins(x.start) - wantTime) < Math.abs(mins(cur.start) - wantTime)) closest.set(k, x);
+          }
+          shown = [...closest.values()].slice(0, 6);
+        }
+      }
+      if (input.earliest === true) shown = shown.slice(0, 3);
+      shown = shown.slice(0, 120);
+
+      if (!shown.length) {
         const any = await hasAnyAvailability(ctx.bot.id, type.id);
         return {
-          slots: [],
+          slots: [], ...(wantTime !== null ? { exact_match: false } : {}),
           note: any
-            ? 'Nothing matches those preferences. Offer to widen them (other days or times) and search again.'
+            ? 'Nothing is open for that. Say so plainly, and ask what else would work (another day or time), or offer to send the full week.'
             : `Fully booked for now. ${ctx.settings.whenFull === 'phone' ? 'Suggest they contact the business directly.' : ctx.settings.whenFull === 'waitlist' ? 'Offer to take their email so the business can reach out when a time opens.' : 'Offer to take their name and email so the business can contact them.'}`,
         };
       }
 
-      const choices: SlotChoice[] = picked.map((s) => ({ start: s.start.toISOString(), dayLabel: formatDay(s.start, tz), timeLabel: formatTime(s.start, tz, f) }));
-      const last = picked[picked.length - 1].start;
+      const choices: SlotChoice[] = shown.map((x) => ({ start: x.start.toISOString(), dayLabel: formatDay(x.start, tz), timeLabel: formatTime(x.start, tz, f) }));
+      const last = shown[shown.length - 1].start;
       ctx.emit({
-        kind: 'slots', typeId: type.id, typeName: type.name, durationMin: type.durationMin, timezone: tz, tzLabel: zoneAbbreviation(picked[0].start, tz),
-        slots: choices, moreFrom: DateTime.fromJSDate(last, { zone: tz }).plus({ days: 1 }).toISODate(),
+        kind: 'slots', typeId: type.id, typeName: type.name, durationMin: type.durationMin, timezone: tz, tzLabel: zoneAbbreviation(shown[0].start, tz),
+        slots: choices, moreFrom: fullWeek || wantTime !== null ? null : DateTime.fromJSDate(last, { zone: tz }).plus({ days: 1 }).toISODate(),
       });
+
+      const perDay = new Map<string, string[]>();
+      for (const x of shown) {
+        const label = formatDay(x.start, tz);
+        (perDay.get(label) ?? perDay.set(label, []).get(label)!).push(formatTime(x.start, tz, f));
+      }
       return {
         meeting_type: type.name,
         timezone: tz,
-        slots: picked.map((s) => ({ start: s.start.toISOString(), label: whenLabel(s.start, ctx) })),
-        note: 'These are shown to the visitor as tappable buttons — do not list them all in text.',
+        ...(wantTime !== null ? { requested_time: `${String(Math.floor(wantTime / 60)).padStart(2, '0')}:${String(wantTime % 60).padStart(2, '0')}`, exact_match: exact } : {}),
+        open_times: [...perDay].map(([d, times]) => ({ day: d, times: times.join(', ') })),
+        // Exact starts only when the list is short enough to pick from; otherwise narrow with `time`/dates first.
+        ...(shown.length <= 12 ? { starts: shown.map((x) => ({ start: x.start.toISOString(), label: whenLabel(x.start, ctx) })) } : {}),
+        note: [
+          exact === false ? 'The requested time is NOT available on any of these days; the times shown are the closest each day. Say clearly that it is not available.' : '',
+          exact === true ? 'The requested time IS available on the days shown.' : '',
+          'All of this is on screen as tappable buttons. Reply in one or two short sentences (which days are open, or yes/no for the time asked); do not list every time.',
+        ].filter(Boolean).join(' '),
       };
     },
 

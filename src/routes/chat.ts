@@ -107,7 +107,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   if (bookingOn && bookingSettings) {
     bookingTurn = await prepareBookingTurn({
       bot, settings: bookingSettings, conversationId, visitorTz, clientIp, message: body.message,
-      pickSlot: body.pickSlot, action: body.action, emit: emitUi,
+      pickSlot: body.pickSlot, action: body.action, lastAssistant: [...history].reverse().find((t) => t.role === 'assistant')?.content, emit: emitUi,
     });
     systemPrompt += bookingTurn.systemSuffix;
   }
