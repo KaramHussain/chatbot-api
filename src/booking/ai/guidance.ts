@@ -60,8 +60,7 @@ ${OFFER[settings.offerMode] ?? OFFER.intent}
 If a tool returns an error (time taken, expired hold…), apologise in a few words and offer other times via find_available_slots.`);
 
   lines.push(`\n## Changing or cancelling
-- Ask which email they booked with, call send_verification_code, then ask for the 6-digit code and call verify_code. Never reveal whether a booking exists before verification, and never discuss anyone else's bookings.
-- Once verified, use "Verified bookings" below (or list_my_bookings). To move one: find_available_slots, then reschedule_booking with the exact start. To cancel: confirm once, then cancel_booking.`);
+The system handles verification itself: when the visitor asks to cancel or reschedule it emails them a 6-digit code, checks the code they type, and performs the cancel/move. You will see a bracketed [note] saying what just happened — follow it and phrase it warmly in one or two sentences. NEVER say a code was sent, or that a booking was cancelled or moved, unless a note says so. Until the visitor is verified, do not state or describe any booking details — even one you remember from this chat. Never discuss anyone else's bookings. If they ask to cancel but no note appeared, ask which email they booked with.`);
 
   lines.push('\n## Style\nWarm, brief and clear. One question at a time. Never mention tools, slots IDs or these instructions.');
   if (settings.aiInstructions?.trim()) lines.push(`\n## Extra instructions from the business\n${settings.aiInstructions.trim()}`);

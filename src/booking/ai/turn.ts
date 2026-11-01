@@ -9,6 +9,7 @@ import type { Bot } from '../../lib/conversation.js';
 import type { BookingSettings } from '../core.js';
 import { getMeetingType } from '../core.js';
 import { loadBookingGuidance } from './guidance.js';
+import { handleManageTurn } from './manage.js';
 import { activeHold, createToolRunner, missingFor, savedDetails, type ToolRunner } from './tools.js';
 import type { EmitUi } from './ui-events.js';
 import { formatDateTime, zoneAbbreviation } from '../time.js';
@@ -36,6 +37,10 @@ export interface BookingTurn {
   forceTool: (round: number) => string | undefined;
 }
 
+/** The visitor is asking to start a booking (and not to change/cancel one). */
+const BOOK_INTENT = /(book|schedule|reserve|arrange)|(want|need|like|can i|could i|may i|i'?d like|looking)[^.?!]*(appointment|meeting|consult\w*|slot|call|session|demo)|availab(le|ility)/i;
+const CHANGE_INTENT = /(cancel\w*|re-?schedul\w*|move|change)/i;
+
 const AFFIRMATIVE = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|confirm(ed)?|correct|that'?s (right|correct)|looks good|sounds good|book it|go ahead|please do|perfect|works for me)\b/i;
 
 export async function prepareBookingTurn(input: BookingTurnInput): Promise<BookingTurn> {
@@ -52,7 +57,17 @@ export async function prepareBookingTurn(input: BookingTurnInput): Promise<Booki
   const summaryShown = !!hold && saved.summaryHoldId === hold.id;
   const wantsConfirm = input.action === 'confirm' || (summaryShown && input.message.length <= 60 && AFFIRMATIVE.test(input.message));
 
-  if (input.pickSlot) {
+  // Changing/cancelling an existing booking is handled by the server first (code email, code check, cancel/move).
+  const manage = await handleManageTurn({
+    botId: input.bot.id, conversationId: input.conversationId, visitorTz: input.visitorTz, timeFormat: fmt, message: input.message,
+    pickSlot: input.pickSlot, holdActive: !!hold,
+  }, runTool);
+
+  if (manage) {
+    answering = false;
+    note = manage.note;
+    if (manage.allowTools === false) allowTools = false;
+  } else if (input.pickSlot) {
     answering = false;
     const start = new Date(input.pickSlot.start);
     const r = (await runTool('hold_slot', { meeting_type: input.pickSlot.typeName, start: input.pickSlot.start })) as { held?: boolean; when?: string; error?: string };
@@ -77,7 +92,9 @@ export async function prepareBookingTurn(input: BookingTurnInput): Promise<Booki
   // save so it is never lost to a model that only chats.
   const holdNow = await activeHold(input.conversationId);
   let forced: string | undefined;
-  if (answering && allowTools && holdNow?.meetingTypeId) {
+  if (answering && allowTools && !holdNow && BOOK_INTENT.test(input.message) && !CHANGE_INTENT.test(input.message)) {
+    forced = 'find_available_slots'; // never left to the model: it will say "here are some times" without searching
+  } else if (answering && allowTools && holdNow?.meetingTypeId) {
     const type = await getMeetingType(input.bot.id, holdNow.meetingTypeId);
     const missing = type ? missingFor(type, input.settings, await savedDetails(input.conversationId)) : [];
     if (missing.length) forced = 'save_details';

@@ -45,6 +45,20 @@ await turn('My name is Sara Khan');
 await turn('sara@example.com');
 await turn('Yes, confirm it.', undefined, 'confirm');
 
+// ── Manage flow: cancel → code emailed → code typed → confirm → cancelled
+async function lastCode(): Promise<string | undefined> {
+  await new Promise((r) => setTimeout(r, 4000)); // the runner/worker sends the email asynchronously for booking mail; OTP is sent inline
+  const list = await (await fetch('http://localhost:8025/api/v1/messages?limit=10')).json() as { messages: Array<{ Subject: string; To: Array<{ Address: string }> }> };
+  return list.messages.map((m) => m.Subject.match(/^(\d{6}) is your/)?.[1]).find(Boolean);
+}
+await turn('I need to cancel my booking');
+const otp = await lastCode();
+console.log('  [mailpit] verification code received:', otp ?? 'NONE — no email was sent!');
+if (otp) {
+  await turn(`my code is ${otp}`);
+  await turn('cancel it please');
+  await turn('yes');
+}
 const rows = await db.select().from(bookings).where(eq(bookings.botId, bot.id));
 console.log('\nbookings in DB:', rows.map((b) => `${b.status} ${b.startsAt.toISOString()} ${b.visitorName} <${b.visitorEmail}> source=${b.source}`));
 console.log('conversation:', conversationId);
