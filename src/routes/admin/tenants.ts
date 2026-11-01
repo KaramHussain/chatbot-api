@@ -96,6 +96,8 @@ const updateTenantSchema = z.object({
   monthlyTokenBudget: z.number().int().min(0).optional(),
   sessionDurationMinutes: z.number().int().min(1).max(43200).optional(),
   maxUploadMb: z.number().int().min(1).max(500).nullable().optional(),
+  // Per-tenant feature switches overriding the plan default, e.g. { booking: true }. Omit a key to follow the plan.
+  featureOverrides: z.record(z.enum(['booking']), z.boolean()).optional(),
 });
 
 router.put('/:id', zValidator('json', updateTenantSchema), async (c) => {

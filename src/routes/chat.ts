@@ -6,6 +6,13 @@ import { eq, asc } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { streamChat } from '../lib/bedrock.js';
 import { Stopwatch } from '../lib/stopwatch.js';
+import { getSettings } from '../booking/core.js';
+import { tenantHasBooking } from '../booking/entitlements.js';
+import { bookingToolSpecs } from '../booking/ai/tools.js';
+import { prepareBookingTurn, type BookingTurn } from '../booking/ai/turn.js';
+import { streamWithTools } from '../booking/ai/loop.js';
+import type { BookingUiEvent } from '../booking/ai/ui-events.js';
+import { safeTimezone } from '../booking/time.js';
 import {
   addTenantTokens,
   buildSystemPrompt,
@@ -32,6 +39,11 @@ const chatSchema = z.object({
   conversationId: z.string().uuid().optional(),
   visitorId: z.string().max(100).optional(),
   voice: z.boolean().optional(), // message came from the voice orb → answer for the ear
+  timezone: z.string().max(64).optional(), // the visitor's IANA zone — times are shown/booked in it
+  // Set when the visitor tapped a time card instead of typing; `message` is the human-readable echo.
+  pickSlot: z.object({ start: z.string().max(40), typeName: z.string().max(100).optional() }).optional(),
+  // Set when the visitor tapped the Confirm button on the confirmation card.
+  action: z.literal('confirm').optional(),
 });
 
 // POST /api/chat — main chat endpoint, returns SSE stream
@@ -73,47 +85,81 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   ]);
   timing.mark('context');
 
-  const systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });
+  // Bookings: only when this bot enabled it AND the plan allows it. Text chat only (voice has its own path).
+  const bookingSettings = !body.voice ? await getSettings(bot.id) : undefined;
+  const bookingOn = !!bookingSettings?.enabled && (await tenantHasBooking(bot.tenantId));
+  const visitorTz = safeTimezone(body.timezone, safeTimezone(bookingSettings?.timezone));
+
+  let systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });
   const modelId = resolveModelId(bot, tenant);
+  const clientIp = (c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? '').split(',')[0].trim() || undefined;
+
+  // Booking: the server performs the unambiguous steps itself (hold a tapped time, book on Confirm) before the
+  // model speaks. UI events raised before the stream opens are buffered and flushed as soon as it does.
+  const uiBuffer: BookingUiEvent[] = [];
+  let uiSink: ((event: BookingUiEvent) => void) | null = null;
+  let bookedUi = false;
+  const emitUi = (event: BookingUiEvent) => {
+    if (event.kind === 'booked') bookedUi = true;
+    if (uiSink) uiSink(event); else uiBuffer.push(event);
+  };
+  let bookingTurn: BookingTurn | undefined;
+  if (bookingOn && bookingSettings) {
+    bookingTurn = await prepareBookingTurn({
+      bot, settings: bookingSettings, conversationId, visitorTz, clientIp, message: body.message,
+      pickSlot: body.pickSlot, action: body.action, emit: emitUi,
+    });
+    systemPrompt += bookingTurn.systemSuffix;
+  }
 
   // Stream response via SSE
   return streamSSE(c, async (stream) => {
+    // One serialised writer: tool-emitted UI events and streamed text can't interleave mid-message.
+    let chain: Promise<unknown> = Promise.resolve();
+    const send = (payload: Record<string, unknown>) => (chain = chain.then(() => stream.writeSSE({ data: JSON.stringify(payload) })).catch(() => undefined));
+
     // Send conversationId first so the widget knows how to continue
-    await stream.writeSSE({
-      data: JSON.stringify({ type: 'meta', conversationId }),
-    });
+    await send({ type: 'meta', conversationId });
 
     let fullResponse = '';
     let inputTokens = 0;
     let outputTokens = 0;
 
     try {
-      const chatStream = streamChat({
-        systemPrompt,
-        history,
-        userMessage: body.message,
-        modelId,
-        onTokenUsage: (inp, out) => { inputTokens = inp; outputTokens = out; },
-      });
+      uiSink = (event) => { void send({ type: 'booking_ui', ...event }); };
+      while (uiBuffer.length) uiSink(uiBuffer.shift()!);
 
-      for await (const chunk of chatStream) {
+      const plainChat = (userMessage: string) => (async function* () {
+        for await (const text of streamChat({ systemPrompt, history, userMessage, modelId, onTokenUsage: (inp, out) => { inputTokens = inp; outputTokens = out; } })) {
+          yield { type: 'text' as const, text };
+        }
+      })();
+      const source: AsyncIterable<{ type: 'text'; text: string } | { type: 'usage'; inputTokens: number; outputTokens: number }> =
+        bookingTurn?.allowTools
+          ? streamWithTools({
+              systemPrompt, history, userMessage: bookingTurn.userMessage, modelId,
+              tools: bookingToolSpecs(), runTool: bookingTurn.runTool, forceTool: bookingTurn.forceTool,
+            })
+          : plainChat(bookingTurn?.userMessage ?? body.message);
+
+      for await (const ev of source) {
+        if (ev.type === 'usage') { inputTokens += ev.inputTokens; outputTokens += ev.outputTokens; continue; }
         if (!fullResponse) timing.mark('firstToken');
-        fullResponse += chunk;
-        await stream.writeSSE({
-          data: JSON.stringify({ type: 'chunk', text: chunk }),
-        });
+        fullResponse += ev.text;
+        await send({ type: 'chunk', text: ev.text });
+      }
+
+      // A booking was made but the model said nothing (rare): never leave the visitor in silence.
+      if (!fullResponse.trim() && bookedUi) {
+        fullResponse = "You're all set! A confirmation is on its way to your email.";
+        await send({ type: 'chunk', text: fullResponse });
       }
 
       // Tell the widget we're done first (with sources for the citation UI), then persist.
-      await stream.writeSSE({
-        data: JSON.stringify({
-          type: 'done',
-          sources: sources.map((s) => ({ documentName: s.documentName, score: s.score })),
-        }),
-      });
+      await send({ type: 'done', sources: sources.map((s) => ({ documentName: s.documentName, score: s.score })) });
       timing.mark('done');
       // One structured line per request, so latency can be diagnosed from the logs.
-      console.log(JSON.stringify({ evt: 'chat_timing', botId: bot.id, model: modelId ?? 'default', voice: !!body.voice, ...timing.toJSON() }));
+      console.log(JSON.stringify({ evt: 'chat_timing', botId: bot.id, model: modelId ?? 'default', voice: !!body.voice, booking: bookingOn, ...timing.toJSON() }));
 
       await Promise.all([
         saveMessage(conversationId, {
@@ -128,9 +174,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
       ]);
     } catch (err) {
       console.error('Chat stream error:', err);
-      await stream.writeSSE({
-        data: JSON.stringify({ type: 'error', message: 'Something went wrong' }),
-      });
+      await send({ type: 'error', message: 'Something went wrong' });
     }
   });
 });

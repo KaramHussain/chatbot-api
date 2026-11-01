@@ -7,7 +7,10 @@ import { addTenantTokens } from '../lib/conversation.js';
 import { bookings, type AiSummary } from './schema.js';
 
 const SYSTEM = `You summarise a website-chat conversation for a business owner who just received a booking.
-Reply with ONLY compact JSON: {"intent": string (one sentence: what the visitor wants), "keyFacts": string[] (max 4 short facts they shared that matter for the meeting), "questions": string[] (max 3 questions they asked), "sentiment": "positive"|"neutral"|"negative"}.
+Reply with ONLY compact JSON: {"intent": string, "keyFacts": string[], "questions": string[], "sentiment": "positive"|"neutral"|"negative"}.
+- intent: one sentence on WHY the visitor wants this meeting, from what they said beyond the booking itself (their problem, interest, budget, urgency). If they only asked to book with no context, write "Booked directly without further context."
+- keyFacts: up to 4 useful things they shared that the owner should know before the meeting. NEVER include the booking logistics (the chosen time, their name, their email or phone) — the owner already has those. Use [] if there is nothing else.
+- questions: up to 3 questions they asked the bot (not booking questions like "what is your email"). [] if none.
 Use only facts stated in the conversation. Do not invent anything. No markdown.`;
 
 export function parseSummary(raw: string): AiSummary | null {

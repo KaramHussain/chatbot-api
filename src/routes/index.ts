@@ -14,6 +14,10 @@ import voiceRouter from './voice.js';
 import accountRouter from './account.js';
 import logosRouter from './logos.js';
 import tenantThemesRouter from './tenant-themes.js';
+import bookingOwnerRouter from '../booking/routes/index.js';
+import bookingFeedRouter from '../booking/routes/feed.js';
+import bookingPublicRouter from '../booking/routes/public.js';
+import { requireBookingFeature } from '../booking/entitlements.js';
 import type { HonoEnv } from '../types/index.js';
 
 const api = new Hono<HonoEnv>();
@@ -25,6 +29,8 @@ api.route('/widget-config', widgetRouter);
 api.route('/widget/voice', voiceRouter);
 api.route('/widget', widgetTtsRouter);
 api.route('/chat', chatRouter);
+api.route('/feeds/booking', bookingFeedRouter);
+api.route('/public/booking', bookingPublicRouter);
 api.route('/logos', logosRouter);
 
 // ─── Authenticated routes ──────────────────────────────────────────────────────
@@ -43,6 +49,9 @@ protected_
   .use('/bots/*', requireTenant)
   .use('/documents/*', requireTenant)
   .use('/themes/*', requireTenant)
+  // Bookings (owner dashboard API) — gated by the plan/feature switch.
+  .use('/bots/:id/booking/*', requireBookingFeature as never)
+  .route('/bots/:id/booking', bookingOwnerRouter)
   .route('/bots', botsRouter)
   .route('/documents', documentsRouter)
   .route('/account', accountRouter)

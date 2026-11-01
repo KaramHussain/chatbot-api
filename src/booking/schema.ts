@@ -63,6 +63,7 @@ export const bookingSettings = pgTable('booking_settings', {
   notify: jsonb('notify').$type<NotifyConfig>().notNull().default({}),
   branding: jsonb('branding').$type<Branding>().notNull().default({}),
   feedTokenHash: text('feed_token_hash'),
+  feedVersion: integer('feed_version').notNull().default(1),
   pageSlug: text('page_slug'),
   onboardingDoneAt: timestamp('onboarding_done_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

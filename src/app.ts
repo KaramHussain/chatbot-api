@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { HTTPException } from 'hono/http-exception';
 import apiRoutes from './routes/index.js';
+import bookingPages from './booking/pages/router.js';
 
 const app = new Hono();
 
@@ -27,6 +28,8 @@ app.get('/health', (c) =>
 
 // ─── API Routes ────────────────────────────────────────────────────────────────
 app.route('/api', apiRoutes);
+// Hosted booking pages (manage / approve / booking page) — book.cloudgeniee.com proxies here.
+app.route('/book', bookingPages);
 
 // ─── Error handler ────────────────────────────────────────────────────────────
 app.onError((err, c) => {

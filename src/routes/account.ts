@@ -3,6 +3,7 @@ import { db, tenants, users, bots, botChunks, botDocuments, conversations } from
 import { eq, sql, and, gte, count, asc } from 'drizzle-orm';
 import type { HonoEnv } from '../types/index.js';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
+import { entitlementsFor } from '../booking/entitlements.js';
 
 const router = new Hono<HonoEnv>();
 
@@ -27,6 +28,13 @@ router.delete('/', async (c) => {
   await db.delete(tenants).where(eq(tenants.id, user.tenantId));
 
   return c.json({ success: true });
+});
+
+// GET /api/account/entitlements — which gated features this tenant may use (drives dashboard visibility)
+router.get('/entitlements', async (c) => {
+  const user = c.get('user');
+  if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
+  return c.json({ entitlements: await entitlementsFor(user.tenantId) });
 });
 
 // GET /api/account/settings — return tenant settings for this user

@@ -33,7 +33,7 @@ export const BOOKING_DDL: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS booking_settings_feed_idx ON booking_settings (feed_token_hash) WHERE feed_token_hash IS NOT NULL`,
+  `ALTER TABLE booking_settings ADD COLUMN IF NOT EXISTS feed_version integer NOT NULL DEFAULT 1`,
   `CREATE UNIQUE INDEX IF NOT EXISTS booking_settings_slug_idx ON booking_settings (page_slug) WHERE page_slug IS NOT NULL`,
 
   `CREATE TABLE IF NOT EXISTS meeting_types (

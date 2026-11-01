@@ -13,6 +13,8 @@ const LLM_MODEL = process.env.BEDROCK_LLM_MODEL ?? 'us.amazon.nova-2-lite-v1:0';
 const EMBED_MODEL = process.env.BEDROCK_EMBEDDING_MODEL ?? 'amazon.titan-embed-text-v2:0';
 const EMBED_DIMS = parseInt(process.env.BEDROCK_EMBEDDING_DIMENSIONS ?? '1024');
 
+export const defaultLlmModel = () => LLM_MODEL;
+
 // ─── Embeddings ────────────────────────────────────────────────────────────────
 export async function embedText(text: string): Promise<number[]> {
   const response = await client.send(
@@ -76,9 +78,9 @@ const FALLBACK_MODEL = 'mistral.mistral-large-3-675b-instruct';
 const DENIED_RETRY_MS = 5 * 60_000;
 const deniedUntil = new Map<string, number>();
 
-type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
+export type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
 
-async function openConverseStream(modelId: string, input: ConverseStreamInput, signal?: AbortSignal) {
+export async function openConverseStream(modelId: string, input: ConverseStreamInput, signal?: AbortSignal) {
   if (modelId !== FALLBACK_MODEL && (deniedUntil.get(modelId) ?? 0) <= Date.now()) {
     try {
       return await client.send(new ConverseStreamCommand({ ...input, modelId }), { abortSignal: signal });

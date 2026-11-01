@@ -67,6 +67,20 @@ export function verifyManageToken(token: string): string | null {
   return a.length === b.length && timingSafeEqual(a, b) ? bookingId : null;
 }
 
+/** Calendar-feed token: re-derivable (so the URL can be shown again); bumping `version` revokes the old URL. */
+export function signFeedToken(botId: string, version: number): string {
+  return `${botId}.${version}.${sign(`feed:${botId}:${version}`).slice(0, 32)}`;
+}
+
+export function verifyFeedToken(token: string): { botId: string; version: number } | null {
+  const [botId, version, mac, ...rest] = token.split('.');
+  if (!botId || !version || !mac || rest.length || !/^[0-9a-f-]{36}$/i.test(botId) || !/^\d+$/.test(version)) return null;
+  const expected = sign(`feed:${botId}:${version}`).slice(0, 32);
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b) ? { botId, version: Number(version) } : null;
+}
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
