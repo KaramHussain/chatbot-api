@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { jsonBody } from '../lib/validation.js';
 import { z } from 'zod';
-import { db, bots, botChunks, botDocuments, conversations, messages, tenants } from '../db/index.js';
+import { db, bots, botChunks, botDocuments, conversations, messages, tenants, tenantThemes } from '../db/index.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
-import { putObject, buildLogoKey } from '../lib/s3.js';
+import { putObject, buildLogoKey, copyObject } from '../lib/s3.js';
 import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
@@ -118,6 +118,27 @@ router.post('/', jsonBody(createBotSchema), async (c) => {
   return c.json({ bot }, 201);
 });
 
+/**
+ * Copies a per-bot image (`.../api/logos/tenants/<tenant>/bots/<bot>/<file>`) to the new bot's own path and
+ * returns its new URL. Shared presets and external URLs are left as they are; a failed copy keeps the old URL.
+ */
+async function copyBotImage(url: string | null, tenantId: string, fromBotId: string, toBotId: string): Promise<string | null> {
+  const marker = '/api/logos/';
+  const at = url ? url.indexOf(marker) : -1;
+  if (!url || at < 0) return url;
+  const key = url.slice(at + marker.length);
+  const prefix = `tenants/${tenantId}/bots/${fromBotId}/`;
+  if (!key.startsWith(prefix)) return url;
+  const newKey = `tenants/${tenantId}/bots/${toBotId}/${key.slice(prefix.length)}`;
+  try {
+    await copyObject(key, newKey);
+    return url.slice(0, at + marker.length) + newKey;
+  } catch (err) {
+    console.error('duplicate: could not copy image', key, (err as Error).message);
+    return url;
+  }
+}
+
 // POST /api/bots/:id/duplicate — copy a bot's configuration under a new name.
 // Copies identity, appearance, behaviour, voice, lead capture and embed settings. Deliberately NOT copied:
 // knowledge (documents/chunks), conversations, and everything under Bookings.
@@ -144,8 +165,27 @@ router.post('/:id/duplicate', jsonBody(duplicateBotSchema), async (c) => {
   const hasRoom = Number(active) < plan.maxBots;
 
   const { id: _id, tenantId: _t, name: _n, slug: _s, status: _st, createdAt: _c, updatedAt: _u, bookingEnabled: _b, ...config } = source;
+  const newId = crypto.randomUUID();
+
+  // Independent from the original: colour profiles are shared by every bot using them, so the copy gets its
+  // OWN profile; and image files are stored per bot, so the copy gets its own files (replacing the original's
+  // logo later must not change the copy, and vice versa).
+  if (config.tenantThemeId) {
+    const [theme] = await db.select().from(tenantThemes).where(and(eq(tenantThemes.id, config.tenantThemeId), eq(tenantThemes.tenantId, tenantId))).limit(1);
+    if (theme) {
+      const { id: _tid, createdAt: _tc, updatedAt: _tu, name: themeName, ...palette } = theme;
+      const [cloned] = await db.insert(tenantThemes).values({ ...palette, name: `${themeName} (copy)`.slice(0, 100) }).returning({ id: tenantThemes.id });
+      config.tenantThemeId = cloned.id;
+    } else {
+      config.tenantThemeId = null;
+    }
+  }
+  for (const field of ['logoUrl', 'botAvatarUrl', 'launcherLogoUrl'] as const) {
+    config[field] = await copyBotImage(config[field], tenantId, source.id, newId);
+  }
+
   const [bot] = await db.insert(bots).values({
-    ...config, tenantId, name, slug, status: hasRoom ? 'active' : 'inactive', bookingEnabled: false,
+    ...config, id: newId, tenantId, name, slug, status: hasRoom ? 'active' : 'inactive', bookingEnabled: false,
   }).returning();
 
   return c.json({ bot, startedInactive: !hasRoom, maxBots: plan.maxBots, planLabel: plan.label }, 201);

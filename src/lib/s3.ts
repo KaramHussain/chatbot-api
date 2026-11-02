@@ -1,5 +1,6 @@
 import {
   S3Client,
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
@@ -30,6 +31,11 @@ export async function getPresignedUploadUrl(params: {
 export async function getPresignedDownloadUrl(key: string): Promise<string> {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   return getSignedUrl(s3, command, { expiresIn: 3600 });
+}
+
+/** Server-side copy inside the bucket (no download/upload). */
+export async function copyObject(sourceKey: string, destKey: string): Promise<void> {
+  await s3.send(new CopyObjectCommand({ Bucket: BUCKET, Key: destKey, CopySource: encodeURIComponent(`${BUCKET}/${sourceKey}`) }));
 }
 
 export async function deleteObject(key: string): Promise<void> {

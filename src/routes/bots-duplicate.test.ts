@@ -1,11 +1,14 @@
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
-import { bots, conversations, db } from '../db/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import { bots, conversations, db, tenantThemes } from '../db/index.js';
 import { bookingSettings, meetingTypes } from '../booking/schema.js';
 import { seedBot } from '../booking/test-utils.js';
 import botsRouter from './bots.js';
 import type { HonoEnv } from '../types/index.js';
+
+const { copyObject } = vi.hoisted(() => ({ copyObject: vi.fn(async () => undefined) }));
+vi.mock('../lib/s3.js', async (orig) => ({ ...(await orig<typeof import('../lib/s3.js')>()), copyObject }));
 
 function appFor(tenantId: string) {
   const app = new Hono<HonoEnv>();
@@ -71,5 +74,30 @@ describe('duplicate bot', () => {
     await db.update(bots).set({ status: 'active' }).where(eq(bots.id, a.bot.id));
     expect((await duplicate(appFor(a.tenant.id), a.bot.id, '   ')).status).toBe(400);
     expect(await db.select().from(bots).where(and(eq(bots.tenantId, a.tenant.id), eq(bots.name, 'Stolen')))).toHaveLength(0);
+  });
+
+  it('gives the copy its own colour profile and its own image files (no sharing with the original)', async () => {
+    const { tenant, bot } = await seedBot({ plan: 'enterprise' });
+    const [theme] = await db.insert(tenantThemes).values({ tenantId: tenant.id, name: 'Ocean profile', primaryColor: '#0e7490', userBubbleColor: '#155e75' }).returning();
+    const logo = `https://api.test/api/logos/tenants/${tenant.id}/bots/${bot.id}/logo.png`;
+    const preset = 'https://cdn.test/presets/robot.png'; // shared preset: not per-bot, must stay as is
+    await db.update(bots).set({ tenantThemeId: theme.id, logoUrl: logo, botAvatarUrl: preset }).where(eq(bots.id, bot.id));
+
+    const res = await duplicate(appFor(tenant.id), bot.id, 'Independent copy');
+    const { bot: copy } = await res.json() as { bot: typeof bot };
+
+    // own colour profile: same colours, different row — editing one can never change the other
+    expect(copy.tenantThemeId).toBeTruthy();
+    expect(copy.tenantThemeId).not.toBe(theme.id);
+    const [cloned] = await db.select().from(tenantThemes).where(eq(tenantThemes.id, copy.tenantThemeId!));
+    expect(cloned).toMatchObject({ tenantId: tenant.id, primaryColor: '#0e7490', userBubbleColor: '#155e75', name: 'Ocean profile (copy)' });
+    const [original] = await db.select().from(tenantThemes).where(eq(tenantThemes.id, theme.id));
+    expect(original.name).toBe('Ocean profile');
+
+    // own image file: copied to the new bot's path and referenced from there
+    expect(copyObject).toHaveBeenCalledWith(`tenants/${tenant.id}/bots/${bot.id}/logo.png`, `tenants/${tenant.id}/bots/${copy.id}/logo.png`);
+    expect(copy.logoUrl).toBe(`https://api.test/api/logos/tenants/${tenant.id}/bots/${copy.id}/logo.png`);
+    expect(copy.botAvatarUrl).toBe(preset);
+    expect(copyObject).toHaveBeenCalledTimes(1);
   });
 });

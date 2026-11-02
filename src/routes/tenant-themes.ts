@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { db, tenantThemes } from '../db/index.js';
+import { db, bots, tenantThemes } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import type { HonoEnv } from '../types/index.js';
 
@@ -20,6 +20,14 @@ const themeSchema = z.object({
   headerTextColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
 });
 
+/** theme id -> the bots (id, name) currently using it. A profile is shared by every bot that uses it. */
+async function usedByMap(tenantId: string): Promise<Map<string, Array<{ id: string; name: string }>>> {
+  const rows = await db.select({ id: bots.id, name: bots.name, themeId: bots.tenantThemeId }).from(bots).where(eq(bots.tenantId, tenantId));
+  const map = new Map<string, Array<{ id: string; name: string }>>();
+  for (const r of rows) if (r.themeId) (map.get(r.themeId) ?? map.set(r.themeId, []).get(r.themeId)!).push({ id: r.id, name: r.name });
+  return map;
+}
+
 // GET /api/themes — list all themes for current tenant
 router.get('/', async (c) => {
   const tenantId = c.get('tenantId');
@@ -27,7 +35,8 @@ router.get('/', async (c) => {
     .select()
     .from(tenantThemes)
     .where(eq(tenantThemes.tenantId, tenantId));
-  return c.json({ themes });
+  const usedBy = await usedByMap(tenantId);
+  return c.json({ themes: themes.map((t) => ({ ...t, usedBy: usedBy.get(t.id) ?? [] })) });
 });
 
 // GET /api/themes/:id
@@ -40,7 +49,7 @@ router.get('/:id', async (c) => {
     .where(and(eq(tenantThemes.id, id), eq(tenantThemes.tenantId, tenantId)))
     .limit(1);
   if (!theme) return c.json({ error: 'Not found' }, 404);
-  return c.json({ theme });
+  return c.json({ theme: { ...theme, usedBy: (await usedByMap(tenantId)).get(theme.id) ?? [] } });
 });
 
 // POST /api/themes — create custom theme
