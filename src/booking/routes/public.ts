@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { bots, db } from '../../db/index.js';
 import { jsonBody } from '../../lib/validation.js';
 import { tenantHasBooking } from '../entitlements.js';
-import { BookingError, getSettings, listActiveTypes, type Booking, type BookingSettings, type MeetingType } from '../core.js';
+import { BookingError, getSettings, isBookingReady, listActiveTypes, type Booking, type BookingSettings, type MeetingType } from '../core.js';
 import { bookings, bookingSettings } from '../schema.js';
 import {
   approveBooking, cancelBooking, confirmBooking, declineBooking, getBookingByManageToken, holdSlot, listSlots, rescheduleBooking,
@@ -39,7 +39,7 @@ export async function resolvePublicBot(ref: string): Promise<{ bot: BotRow; sett
   const [bot] = await db.select().from(bots).where(and(eq(bots.id, botId), eq(bots.status, 'active'))).limit(1);
   if (!bot) return null;
   const settings = await getSettings(bot.id);
-  if (!settings?.enabled || !(await tenantHasBooking(bot.tenantId))) return null;
+  if (!settings?.enabled || !(await tenantHasBooking(bot.tenantId)) || !(await isBookingReady(settings))) return null;
   return { bot, settings };
 }
 

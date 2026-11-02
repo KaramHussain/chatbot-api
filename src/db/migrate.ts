@@ -68,4 +68,9 @@ console.log('Plan models ready.');
 for (const stmt of BOOKING_DDL) await client.unsafe(stmt);
 console.log('Booking tables ready.');
 
+// One-time: bots created with the old default ("offer when the visitor shows interest") move to "only when asked".
+await client`CREATE TABLE IF NOT EXISTS booking_migrations (name text PRIMARY KEY)`;
+const ranOfferMode = await client`INSERT INTO booking_migrations (name) VALUES ('offer_mode_request_default') ON CONFLICT DO NOTHING RETURNING name`;
+if (ranOfferMode.length) await client`UPDATE booking_settings SET offer_mode = 'request' WHERE offer_mode = 'intent'`;
+
 await client.end();

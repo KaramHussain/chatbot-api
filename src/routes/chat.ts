@@ -6,7 +6,7 @@ import { eq, asc } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { streamChat } from '../lib/bedrock.js';
 import { Stopwatch } from '../lib/stopwatch.js';
-import { getSettings } from '../booking/core.js';
+import { getSettings, isBookingReady } from '../booking/core.js';
 import { tenantHasBooking } from '../booking/entitlements.js';
 import { bookingToolSpecs } from '../booking/ai/tools.js';
 import { prepareBookingTurn, type BookingTurn } from '../booking/ai/turn.js';
@@ -87,7 +87,8 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
 
   // Bookings: only when this bot enabled it AND the plan allows it. Text chat only (voice has its own path).
   const bookingSettings = !body.voice ? await getSettings(bot.id) : undefined;
-  const bookingOn = !!bookingSettings?.enabled && (await tenantHasBooking(bot.tenantId));
+  // Cheapest checks first; the plan + setup checks only run for bots that switched Bookings on.
+  const bookingOn = !!bookingSettings?.enabled && (await tenantHasBooking(bot.tenantId)) && (await isBookingReady(bookingSettings));
   const visitorTz = safeTimezone(body.timezone, safeTimezone(bookingSettings?.timezone));
 
   let systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });

@@ -1,6 +1,6 @@
 // Shared plumbing for the booking modules: errors, settings, and loading everything the pure
 // availability engine needs from the database.
-import { and, asc, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   availabilityBlocks, availabilityOverrides, availabilityRules, bookings, bookingSettings, meetingTypes,
@@ -154,6 +154,24 @@ export async function expireStaleHolds(botId?: string, client: DbOrTx = db): Pro
     ))
     .returning({ id: bookings.id });
   return res.length;
+}
+
+/**
+ * What the owner has actually set up. A bot only offers bookings when it has at least one active meeting type
+ * AND some working hours — otherwise "enabled" would let the AI promise something that cannot happen.
+ */
+export async function bookingReadiness(botId: string): Promise<{ hasTypes: boolean; hasHours: boolean }> {
+  const [[t], [h]] = await Promise.all([
+    db.select({ n: count() }).from(meetingTypes).where(and(eq(meetingTypes.botId, botId), eq(meetingTypes.active, true))),
+    db.select({ n: count() }).from(availabilityRules).where(eq(availabilityRules.botId, botId)),
+  ]);
+  return { hasTypes: t.n > 0, hasHours: h.n > 0 };
+}
+
+export async function isBookingReady(settings: BookingSettings): Promise<boolean> {
+  if (!settings.enabled) return false;
+  const r = await bookingReadiness(settings.botId);
+  return r.hasTypes && r.hasHours;
 }
 
 export const nowSql = sql`now()`;

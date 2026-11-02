@@ -72,7 +72,8 @@ router.get('/settings', async (c) => {
   const settings = await ensureSettings(bot);
   const [{ types }] = await db.select({ types: sql<number>`count(*)::int` }).from(meetingTypes).where(eq(meetingTypes.botId, bot.id));
   const [{ rules }] = await db.select({ rules: sql<number>`count(*)::int` }).from(availabilityRules).where(eq(availabilityRules.botId, bot.id));
-  return c.json({ settings, setup: { hasTypes: types > 0, hasHours: rules > 0 }, pageUrl: `${bookBase()}/${settings.pageSlug || bot.id}` });
+  const setup = { hasTypes: types > 0, hasHours: rules > 0 };
+  return c.json({ settings, setup, ready: settings.enabled && setup.hasTypes && setup.hasHours, pageUrl: `${bookBase()}/${settings.pageSlug || bot.id}` });
 });
 
 router.put('/settings', jsonBody(settingsSchema), async (c) => {

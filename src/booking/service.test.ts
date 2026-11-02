@@ -1,12 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { bookingJobs, bookings } from './schema.js';
+import { availabilityRules, bookingJobs, bookingSettings, bookings, meetingTypes } from './schema.js';
 import { conversations, db } from '../db/index.js';
 import {
   approveBooking, cancelBooking, confirmBooking, createManualBooking, declineBooking, holdSlot, listSlots,
   markOutcome, rescheduleBooking,
 } from './service.js';
-import { BookingError, expireStaleHolds } from './core.js';
+import { BookingError, expireStaleHolds, isBookingReady, getSettings } from './core.js';
 import { futureSlot, seedBot } from './test-utils.js';
 import { getOverview, listBookings, listPeople, viewCounts } from './queries.js';
 import { hasFeature } from './entitlements.js';
@@ -278,5 +278,25 @@ describe('otp', () => {
     await requestOtp(bot.id, 'a@x.com');
     await requestOtp(bot.id, 'a@x.com');
     expect(await code(requestOtp(bot.id, 'a@x.com'))).toBe('rate_limited');
+  });
+});
+
+describe('booking readiness (a bot only offers bookings once the owner has set it up)', () => {
+  it('is ready only when enabled AND it has an active meeting type AND working hours', async () => {
+    const ready = async (botId: string) => isBookingReady((await getSettings(botId))!);
+
+    const a = await seedBot();
+    expect(await ready(a.bot.id)).toBe(true);
+
+    await db.update(bookingSettings).set({ enabled: false }).where(eq(bookingSettings.botId, a.bot.id));
+    expect(await ready(a.bot.id)).toBe(false); // switched off
+
+    const b = await seedBot();
+    await db.update(meetingTypes).set({ active: false }).where(eq(meetingTypes.botId, b.bot.id));
+    expect(await ready(b.bot.id)).toBe(false); // nothing to book
+
+    const c = await seedBot();
+    await db.delete(availabilityRules).where(eq(availabilityRules.botId, c.bot.id));
+    expect(await ready(c.bot.id)).toBe(false); // no hours
   });
 });

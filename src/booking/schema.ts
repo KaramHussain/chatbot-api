@@ -51,7 +51,7 @@ export const bookingSettings = pgTable('booking_settings', {
   windowDays: integer('window_days').notNull().default(60),
   minNoticeMin: integer('min_notice_min').notNull().default(120),
   dailyCap: integer('daily_cap'),
-  offerMode: text('offer_mode').notNull().default('intent'),
+  offerMode: text('offer_mode').notNull().default('request'),
   term: text('term').notNull().default('appointment'),
   requirePhone: boolean('require_phone').notNull().default(false),
   aiInstructions: text('ai_instructions'),

@@ -16,7 +16,7 @@ export const BOOKING_DDL: string[] = [
     window_days integer NOT NULL DEFAULT 60,
     min_notice_min integer NOT NULL DEFAULT 120,
     daily_cap integer,
-    offer_mode text NOT NULL DEFAULT 'intent',
+    offer_mode text NOT NULL DEFAULT 'request',
     term text NOT NULL DEFAULT 'appointment',
     require_phone boolean NOT NULL DEFAULT false,
     ai_instructions text,
@@ -233,6 +233,8 @@ export const BOOKING_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS email_log_job_idx ON email_log (job_id)`,
   `CREATE INDEX IF NOT EXISTS email_log_bot_idx ON email_log (bot_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS email_log_booking_idx ON email_log (booking_id)`,
+
+  `ALTER TABLE booking_settings ALTER COLUMN offer_mode SET DEFAULT 'request'`,
 
   // Conversation → verified email (set only by the OTP flow; unlocks manage tools for that chat)
   `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS verified_email text`,
