@@ -118,6 +118,39 @@ router.post('/', jsonBody(createBotSchema), async (c) => {
   return c.json({ bot }, 201);
 });
 
+// POST /api/bots/:id/duplicate — copy a bot's configuration under a new name.
+// Copies identity, appearance, behaviour, voice, lead capture and embed settings. Deliberately NOT copied:
+// knowledge (documents/chunks), conversations, and everything under Bookings.
+const duplicateBotSchema = z.object({ name: z.string().trim().min(1).max(100) });
+
+router.post('/:id/duplicate', jsonBody(duplicateBotSchema), async (c) => {
+  const tenantId = c.get('tenantId');
+  const { name } = c.req.valid('json');
+
+  const [source] = await db.select().from(bots).where(and(eq(bots.id, c.req.param('id')), eq(bots.tenantId, tenantId))).limit(1);
+  if (!source) return c.json({ error: 'Bot not found' }, 404);
+  if (source.status === 'draft') return c.json({ error: 'Finish setting up this bot before duplicating it.' }, 400);
+
+  // A unique URL slug within the tenant: "my-bot", then "my-bot-2", "my-bot-3"…
+  const taken = new Set((await db.select({ slug: bots.slug }).from(bots).where(eq(bots.tenantId, tenantId))).map((r) => r.slug));
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'bot';
+  let slug = base;
+  for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`;
+
+  // The copy goes live only if the plan has room for another active bot; otherwise it starts inactive.
+  const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
+  const [{ total: active }] = await db.select({ total: count(bots.id) }).from(bots).where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
+  const hasRoom = Number(active) < plan.maxBots;
+
+  const { id: _id, tenantId: _t, name: _n, slug: _s, status: _st, createdAt: _c, updatedAt: _u, bookingEnabled: _b, ...config } = source;
+  const [bot] = await db.insert(bots).values({
+    ...config, tenantId, name, slug, status: hasRoom ? 'active' : 'inactive', bookingEnabled: false,
+  }).returning();
+
+  return c.json({ bot, startedInactive: !hasRoom, maxBots: plan.maxBots, planLabel: plan.label }, 201);
+});
+
 // PUT /api/bots/:id — update bot settings / branding
 const updateBotSchema = z.object({
   name: z.string().min(1).max(100).optional(),
