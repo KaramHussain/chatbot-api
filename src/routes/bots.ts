@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import type { HonoEnv } from '../types/index.js';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
 import { ttsSpeak } from '../lib/deepgram.js';
+import { isValidGradient } from '../config/gradients.js';
 
 const router = new Hono<HonoEnv>();
 
@@ -65,7 +66,10 @@ const createBotSchema = z.object({
   userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   launcherSize: z.number().int().min(1).max(6).optional(),
-  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left']).optional(),
+  launcherStyle: z.enum(['classic', 'modern']).optional(),
+  launcherLabel: z.string().trim().max(40).nullable().optional(),
+  launcherGradient: z.string().refine(isValidGradient, 'Unknown gradient').optional(),
   launcherTransparent: z.boolean().optional(),
   botAvatarUrl: z.string().url().nullable().optional(),
   responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
@@ -112,7 +116,7 @@ router.post('/', jsonBody(createBotSchema), async (c) => {
 
   const [bot] = await db
     .insert(bots)
-    .values({ ...body, tenantId })
+    .values({ launcherStyle: 'modern', widgetPosition: 'bottom-center', ...body, tenantId })
     .returning();
 
   return c.json({ bot }, 201);
@@ -219,7 +223,10 @@ const updateBotSchema = z.object({
   userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
   launcherSize: z.number().int().min(1).max(6).optional(),
-  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+  widgetPosition: z.enum(['bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left']).optional(),
+  launcherStyle: z.enum(['classic', 'modern']).optional(),
+  launcherLabel: z.string().trim().max(40).nullable().optional(),
+  launcherGradient: z.string().refine(isValidGradient, 'Unknown gradient').optional(),
   launcherTransparent: z.boolean().optional(),
   botAvatarUrl: z.string().url().nullable().optional(),
   headerLogoBg: z.string().nullable().optional(),

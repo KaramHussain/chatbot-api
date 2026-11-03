@@ -122,6 +122,10 @@ export const bots = pgTable('bots', {
   launcherSize: integer('launcher_size').default(3).notNull(),
   widgetPosition: text('widget_position').default('bottom-right'),
   launcherTransparent: boolean('launcher_transparent').default(false).notNull(),
+  // 'classic' = the original round button (existing bots keep it); 'modern' = Aurora bar (centre) / label pill (sides)
+  launcherStyle: text('launcher_style').default('classic').notNull(),
+  launcherLabel: text('launcher_label'),                              // bar placeholder / pill text (null = default)
+  launcherGradient: text('launcher_gradient').default('aurora').notNull(), // preset id | 'brand' | 'custom:#hex,#hex…'
   headerLogoBg: text('header_logo_bg'),   // null=default white tint, 'transparent', or '#hex'
   botAvatarBg: text('bot_avatar_bg'),      // null=primary color, 'transparent', or '#hex'
   launcherBg: text('launcher_bg'),         // null=primary color, 'transparent', or '#hex'

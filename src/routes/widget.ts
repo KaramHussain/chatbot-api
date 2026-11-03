@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { db, bots, tenants, tenantThemes } from '../db/index.js';
+import { resolveLauncherColors } from '../config/gradients.js';
 import { eq, and } from 'drizzle-orm';
 
 const router = new Hono();
@@ -27,6 +28,9 @@ router.get('/:botId', async (c) => {
       botBubbleBg: bots.botBubbleBg,
       launcherSize: bots.launcherSize,
       widgetPosition: bots.widgetPosition,
+      launcherStyle: bots.launcherStyle,
+      launcherLabel: bots.launcherLabel,
+      launcherGradient: bots.launcherGradient,
       launcherTransparent: bots.launcherTransparent,
       headerLogoBg: bots.headerLogoBg,
       botAvatarBg: bots.botAvatarBg,
@@ -72,6 +76,9 @@ router.get('/:botId', async (c) => {
       });
     }
   }
+
+  // Concrete colours for the launcher (a 'brand' gradient follows the final primary colour, custom theme included).
+  Object.assign(config, { launcherColors: resolveLauncherColors(config.launcherGradient, config.primaryColor) });
 
   c.header('Cache-Control', 'no-store, max-age=0');
   return c.json({ config, sessionDurationMinutes });

@@ -45,6 +45,12 @@ await client`ALTER TABLE bots ALTER COLUMN voice_id SET DEFAULT 'aura-2-thalia-e
 await client`UPDATE bots SET voice_id = 'aura-2-thalia-en' WHERE voice_id IS NULL OR voice_id NOT LIKE 'aura-2-%'`;
 console.log('Voice columns ready.');
 
+// Launcher designs: existing bots stay on the classic round button until their owner opts in.
+await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS launcher_style text DEFAULT 'classic' NOT NULL`;
+await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS launcher_label text`;
+await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS launcher_gradient text DEFAULT 'aurora' NOT NULL`;
+console.log('Launcher columns ready.');
+
 // Plan models (Oct 31 2026): Free = Nova 2 Lite, Growth/Business = Mistral Large 3.
 // Tenants still on a previous plan default move to their plan's model; custom admin picks are kept.
 await client`ALTER TABLE tenants ALTER COLUMN ai_model SET DEFAULT 'us.amazon.nova-2-lite-v1:0'`;
