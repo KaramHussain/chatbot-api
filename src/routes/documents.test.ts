@@ -172,6 +172,12 @@ describe('website knowledge', () => {
     const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
     expect(saved.websiteData.pages?.[0]).toMatchObject({ url: page.url, status: 'processing', error: null });
     expect(saved.websiteData.pages?.[1]).toMatchObject(other);
+    expect(saved.websiteData.activePageUrl).toBe(page.url);
+    const listing: any = await (await appFor().request(`/documents?botId=${botId}`)).json();
+    expect(listing.documents.find((item: any) => item.id === doc.id).activePageUrl).toBe(page.url);
+    await db.update(botDocuments).set({ status: 'ready' }).where(eq(botDocuments.id, doc.id));
+    const completed: any = await (await appFor().request(`/documents?botId=${botId}`)).json();
+    expect(completed.documents.find((item: any) => item.id === doc.id).activePageUrl).toBeNull();
   });
   it('deletes one webpage and the synthetic index, preserving siblings and the website', async () => {
     const other = { ...page, url: 'https://example.com/contact' };

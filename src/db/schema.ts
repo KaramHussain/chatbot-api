@@ -173,6 +173,7 @@ export interface WebsiteData {
   excludedUrls?: string[];
   completedJobId?: string;
   needsScrape?: boolean;
+  activePageUrl?: string | null;
 }
 
 // ─── Bot Documents ─────────────────────────────────────────────────────────────

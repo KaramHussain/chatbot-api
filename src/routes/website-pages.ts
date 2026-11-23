@@ -68,7 +68,7 @@ async function schedule(id: string, tenantId: string, pageUrl?: string, edit?: z
     if (pageUrl && !pages.some(page => page.url === pageUrl)) return { error: 'Webpage not found', code: 404 } as const;
     const jobId = randomUUID();
     const maxPages = Math.min(1000, Math.max(baseData.maxPages ?? 30, pages.length));
-    const websiteData = { ...baseData, jobId, maxPages, needsScrape: false, pages: pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'processing' as const, error: null, updatedAt: new Date().toISOString() } : page) };
+    const websiteData = { ...baseData, jobId, maxPages, activePageUrl: pageUrl ?? null, needsScrape: false, pages: pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'processing' as const, error: null, updatedAt: new Date().toISOString() } : page) };
     await tx.update(botDocuments).set({ name: updatedDoc.name, sourceUrl: updatedDoc.sourceUrl, websiteData, status: 'processing', errorMessage: null, ...(urlChanged ? { chunkCount: 0 } : {}), updatedAt: new Date() }).where(eq(botDocuments.id, id));
     return { doc: updatedDoc, websiteData, jobId, maxPages };
   });

@@ -40,6 +40,7 @@ router.get('/', async (c) => {
     pageCount: websiteData.pages?.length ?? null,
     failedPageCount: websiteData.pages?.filter(page => page.status === 'failed').length ?? 0,
     needsScrape: websiteData.needsScrape ?? false,
+    activePageUrl: doc.status === 'processing' ? websiteData.activePageUrl ?? null : null,
   })) });
 });
 
