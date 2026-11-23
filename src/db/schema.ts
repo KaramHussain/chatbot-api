@@ -144,6 +144,24 @@ export const bots = pgTable('bots', {
   tenantIdIdx: index('bots_tenant_id_idx').on(t.tenantId),
 }));
 
+export interface WebsitePage {
+  url: string;
+  title: string;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  updatedAt: string;
+  error?: string | null;
+  hasContent?: boolean;
+  lastSuccessfulAt?: string;
+}
+export interface WebsiteData {
+  maxPages?: number;
+  jobId?: string;
+  scrapedAt?: string;
+  pages?: WebsitePage[];
+  excludedUrls?: string[];
+  completedJobId?: string;
+}
+
 // ─── Bot Documents ─────────────────────────────────────────────────────────────
 // Files/URLs uploaded by the client — each gets chunked + embedded
 export const botDocuments = pgTable('bot_documents', {
@@ -154,6 +172,7 @@ export const botDocuments = pgTable('bot_documents', {
   type: documentTypeEnum('type').notNull(),
   s3Key: text('s3_key'),                            // for file uploads
   sourceUrl: text('source_url'),                    // for URL crawl
+  websiteData: jsonb('website_data').$type<WebsiteData>().default({}).notNull(),
   status: documentStatusEnum('status').default('pending').notNull(),
   chunkCount: integer('chunk_count').default(0).notNull(),
   errorMessage: text('error_message'),

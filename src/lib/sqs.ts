@@ -15,6 +15,8 @@ export interface IngestionJob {
   // URL scraping
   sourceUrl?: string;
   maxPages?: number;
+  jobId?: string;
+  pageUrl?: string;
 }
 
 export async function queueIngestionJob(job: IngestionJob): Promise<void> {
@@ -24,7 +26,7 @@ export async function queueIngestionJob(job: IngestionJob): Promise<void> {
       MessageBody: JSON.stringify(job),
       // Group by botId so jobs for the same bot are processed in order
       MessageGroupId: job.botId,
-      MessageDeduplicationId: job.documentId,
+      MessageDeduplicationId: job.jobId ?? job.documentId,
     })
   );
 }

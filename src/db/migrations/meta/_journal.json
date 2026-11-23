@@ -29,6 +29,13 @@
       "when": 1749945600000,
       "tag": "0003_custom_themes",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795392000000,
+      "tag": "0010_website_pages",
+      "breakpoints": true
     }
   ]
 }

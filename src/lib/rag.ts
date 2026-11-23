@@ -40,7 +40,7 @@ export async function retrieveContext(params: {
       JOIN bot_documents bd ON bd.id = bc.document_id
       WHERE bc.bot_id = ${botId}
         AND bc.tenant_id = ${tenantId}
-        AND bd.status = 'ready'
+        AND (bd.status = 'ready' OR (bd.type = 'url' AND bd.status IN ('processing', 'failed')))
         AND (1 - (bc.embedding <=> ${embeddingStr}::vector)) >= ${MIN_VECTOR_SCORE}
       LIMIT 30
     ),
@@ -60,7 +60,7 @@ export async function retrieveContext(params: {
       JOIN bot_documents bd ON bd.id = bc.document_id
       WHERE bc.bot_id = ${botId}
         AND bc.tenant_id = ${tenantId}
-        AND bd.status = 'ready'
+        AND (bd.status = 'ready' OR (bd.type = 'url' AND bd.status IN ('processing', 'failed')))
         AND to_tsvector('english', bc.content) @@ websearch_to_tsquery('english', ${query})
       LIMIT 30
     ),
