@@ -35,6 +35,68 @@ afterAll(async () => {
 });
 
 describe('website knowledge', () => {
+  const patch = (app: ReturnType<typeof appFor>, id: string, data: unknown) => app.request(`/documents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  it('renames a website without scraping or changing its saved knowledge by default', async () => {
+    const data = { maxPages: 50, jobId: randomUUID(), pages: [page], excludedUrls: ['https://example.com/excluded'], scrapedAt: page.updatedAt };
+    const doc = await website({ websiteData: data });
+    const response = await patch(appFor(), doc.id, { name: 'Updated name', url: 'https://EXAMPLE.com/#section' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ documentId: doc.id, rescrapeStarted: false });
+    const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
+    expect(saved.name).toBe('Updated name'); expect(saved.websiteData).toEqual(data);
+    expect(queue).not.toHaveBeenCalled();
+  });
+  it('lets a name-only edit explicitly request a re-scrape', async () => {
+    const doc = await website();
+    const response = await patch(appFor(), doc.id, { name: 'Renamed', url: doc.sourceUrl, rescrape: true });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ rescrapeStarted: true });
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ documentId: doc.id, documentName: 'Renamed', sourceUrl: 'https://example.com/' }));
+  });
+  it('clears only the old website knowledge on URL correction and can scrape later', async () => {
+    const oldRun = randomUUID();
+    const doc = await website({ websiteData: { jobId: oldRun, pages: [page], excludedUrls: [page.url], scrapedAt: page.updatedAt } });
+    const other = await website();
+    for (const id of [doc.id, other.id]) await db.execute(sql`INSERT INTO bot_chunks(document_id,bot_id,tenant_id,content,chunk_index,metadata,embedding) VALUES(${id},${botId},${tenantId},'saved content',0,'{}',${JSON.stringify(Array(1024).fill(0))}::vector)`);
+    const response = await patch(appFor(), doc.id, { name: 'Correct website', url: 'https://correct.example.com', rescrape: false });
+    expect(response.status).toBe(200);
+    const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
+    expect(saved.sourceUrl).toBe('https://correct.example.com/'); expect(saved.status).toBe('ready');
+    expect(saved.websiteData).toMatchObject({ pages: [], needsScrape: true });
+    expect(saved.websiteData.excludedUrls).toBeUndefined(); expect(saved.websiteData.scrapedAt).toBeUndefined();
+    expect(saved.websiteData.jobId).not.toBe(oldRun);
+    expect(await db.execute(sql`SELECT id FROM bot_chunks WHERE document_id=${doc.id}`)).toHaveLength(0);
+    expect(await db.execute(sql`SELECT id FROM bot_chunks WHERE document_id=${other.id}`)).toHaveLength(1);
+    expect(queue).not.toHaveBeenCalled();
+    const listing = await (await appFor().request(`/documents?botId=${botId}`)).json();
+    expect(listing.documents.find((item: { id: string }) => item.id === doc.id)).toMatchObject({ needsScrape: true, pageCount: 0 });
+    expect((await appFor().request(`/documents/${doc.id}/rescrape`, { method: 'POST' })).status).toBe(202);
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ documentId: doc.id, sourceUrl: saved.sourceUrl }));
+  });
+  it('queues the corrected URL without old seeds, exclusions or page inventory', async () => {
+    const doc = await website({ websiteData: { pages: [page], excludedUrls: [page.url], maxPages: 100 } });
+    expect((await patch(appFor(), doc.id, { name: 'Correct site', url: 'https://new.example.com/', rescrape: true })).status).toBe(200);
+    const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
+    expect(saved.websiteData).toMatchObject({ pages: [], maxPages: 100, needsScrape: false });
+    expect(saved.websiteData.excludedUrls).toBeUndefined(); expect(saved.status).toBe('processing');
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ documentId: doc.id, sourceUrl: 'https://new.example.com/' }));
+  });
+  it('reports a saved edit accurately if queue submission fails', async () => {
+    const doc = await website(); queue.mockRejectedValueOnce(new Error('Queue unavailable'));
+    const response = await patch(appFor(), doc.id, { name: 'Saved correction', url: 'https://correct.example.com', rescrape: true });
+    expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ rescrapeStarted: false, message: expect.stringContaining('changes were saved') });
+    const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
+    expect(saved.name).toBe('Saved correction'); expect(saved.sourceUrl).toBe('https://correct.example.com/'); expect(saved.status).toBe('failed');
+  });
+  it('rejects foreign, busy, file and invalid website edits', async () => {
+    const doc = await website(); const data = { name: 'Edit', url: 'https://example.com' };
+    expect((await patch(appFor(randomUUID()), doc.id, data)).status).toBe(404);
+    const file = await website({ type: 'pdf' }); expect((await patch(appFor(), file.id, data)).status).toBe(404);
+    await db.update(botDocuments).set({ status: 'processing' }).where(eq(botDocuments.id, doc.id));
+    expect((await patch(appFor(), doc.id, data)).status).toBe(409);
+    for (const invalid of [{ ...data, name: ' ' }, { ...data, url: 'not-a-url' }, { ...data, url: 'ftp://example.com' }]) expect((await patch(appFor(), doc.id, invalid)).status).toBe(400);
+    expect(queue).not.toHaveBeenCalled();
+  });
   it('rejects invalid addresses, unsupported schemes and embedded login details', async () => {
     for (const url of ['not-a-url', 'ftp://example.com', 'https://user:password@example.com']) {
       const response = await appFor().request('/documents/scrape-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botId, url }) });

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { botChunks, botDocuments, db, type WebsitePage } from '../db/index.js';
 import { queueIngestionJob } from '../lib/sqs.js';
 import type { HonoEnv } from '../types/index.js';
+import { canonicalWebsiteUrl, websiteUrlSchema } from '../lib/website-url.js';
 
 const router = new Hono<HonoEnv>();
 const pageBody = z.object({ url: z.string().url().max(2048) });
@@ -39,20 +40,40 @@ router.get('/:id/pages', async (c) => {
     summary: { total: all.length, ready: all.filter(p => p.status === 'ready').length, failed: all.filter(p => p.status === 'failed').length, processing: all.filter(p => busy(p.status)).length }, scrapedAt: doc.websiteData.scrapedAt ?? null });
 });
 
-async function schedule(id: string, tenantId: string, pageUrl?: string) {
+const websiteEditSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  url: websiteUrlSchema,
+  rescrape: z.boolean().default(false),
+});
+
+async function schedule(id: string, tenantId: string, pageUrl?: string, edit?: z.infer<typeof websiteEditSchema>) {
   const result = await db.transaction(async tx => {
     const [doc] = await tx.select().from(botDocuments).where(and(eq(botDocuments.id, id), eq(botDocuments.tenantId, tenantId), eq(botDocuments.type, 'url'))).for('update');
     if (!doc?.sourceUrl) return { error: 'Website not found', code: 404 } as const;
     if (busy(doc.status)) return { error: 'A website update is already running. Please wait for it to finish.', code: 409 } as const;
-    const pages = await websitePages(doc);
+    const urlChanged = !!edit && canonicalWebsiteUrl(doc.sourceUrl) !== edit.url;
+    // A corrected address must never continue serving the wrong website's content.
+    // Reset its page inventory, exclusions and run identity in the same transaction.
+    const baseData = urlChanged ? { maxPages: doc.websiteData.maxPages ?? 30, pages: [], needsScrape: true, jobId: randomUUID() } : doc.websiteData;
+    if (urlChanged) await tx.delete(botChunks).where(and(eq(botChunks.documentId, id), eq(botChunks.tenantId, tenantId)));
+    const updatedDoc = { ...doc, name: edit?.name ?? doc.name, sourceUrl: edit?.url ?? doc.sourceUrl, websiteData: baseData };
+    if (edit && !edit.rescrape) {
+      const status = urlChanged ? 'ready' as const : doc.status;
+      await tx.update(botDocuments).set({ name: updatedDoc.name, sourceUrl: updatedDoc.sourceUrl, websiteData: baseData,
+        status, errorMessage: urlChanged ? null : doc.errorMessage, chunkCount: urlChanged ? 0 : doc.chunkCount, updatedAt: new Date(),
+      }).where(eq(botDocuments.id, id));
+      return { saved: true, documentId: id, status, rescrapeStarted: false } as const;
+    }
+    const pages = await websitePages(updatedDoc);
     if (pageUrl && !pages.some(page => page.url === pageUrl)) return { error: 'Webpage not found', code: 404 } as const;
     const jobId = randomUUID();
-    const maxPages = Math.min(1000, Math.max(doc.websiteData.maxPages ?? 30, pages.length));
-    const websiteData = { ...doc.websiteData, jobId, maxPages, pages: pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'processing' as const, error: null, updatedAt: new Date().toISOString() } : page) };
-    await tx.update(botDocuments).set({ websiteData, status: 'processing', errorMessage: null, updatedAt: new Date() }).where(eq(botDocuments.id, id));
-    return { doc, websiteData, jobId, maxPages };
+    const maxPages = Math.min(1000, Math.max(baseData.maxPages ?? 30, pages.length));
+    const websiteData = { ...baseData, jobId, maxPages, needsScrape: false, pages: pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'processing' as const, error: null, updatedAt: new Date().toISOString() } : page) };
+    await tx.update(botDocuments).set({ name: updatedDoc.name, sourceUrl: updatedDoc.sourceUrl, websiteData, status: 'processing', errorMessage: null, ...(urlChanged ? { chunkCount: 0 } : {}), updatedAt: new Date() }).where(eq(botDocuments.id, id));
+    return { doc: updatedDoc, websiteData, jobId, maxPages };
   });
   if ('error' in result) return result;
+  if ('saved' in result) return result;
   const { doc, websiteData, jobId, maxPages } = result;
   try {
     await queueIngestionJob({ documentId: id, botId: doc.botId, tenantId, documentType: 'url', documentName: doc.name, sourceUrl: doc.sourceUrl!, maxPages, jobId, ...(pageUrl ? { pageUrl } : {}) });
@@ -63,10 +84,17 @@ async function schedule(id: string, tenantId: string, pageUrl?: string) {
       const failedPages = websiteData.pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'failed' as const, error: 'The scraping job could not be queued. Please try again.', updatedAt: new Date().toISOString() } : page);
       await tx.update(botDocuments).set({ websiteData: { ...current.websiteData, pages: failedPages }, status: failedPages.some(page => page.hasContent) ? 'ready' : 'failed', errorMessage: 'We could not start the update. Please try again.', updatedAt: new Date() }).where(eq(botDocuments.id, id));
     });
+    if (edit) return { saved: true, documentId: id, status: 'failed', rescrapeStarted: false, message: 'Your changes were saved, but the re-scrape could not start. Choose Scrape Again to retry.' } as const;
     return { error: 'We could not start the update. Please try again.', code: 503 } as const;
   }
-  return { documentId: id, status: 'processing' };
+  return { documentId: id, status: 'processing', rescrapeStarted: true };
 }
+
+router.patch('/:id', zValidator('json', websiteEditSchema), async (c) => {
+  if (!z.string().uuid().safeParse(c.req.param('id')).success) return c.json({ error: 'Website not found' }, 404);
+  const result = await schedule(c.req.param('id'), c.get('tenantId'), undefined, c.req.valid('json'));
+  return 'error' in result ? c.json({ error: result.error }, result.code) : c.json(result);
+});
 
 router.post('/:id/rescrape', async (c) => {
   if (!z.string().uuid().safeParse(c.req.param('id')).success) return c.json({ error: 'Website not found' }, 404);

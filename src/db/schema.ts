@@ -160,6 +160,7 @@ export interface WebsiteData {
   pages?: WebsitePage[];
   excludedUrls?: string[];
   completedJobId?: string;
+  needsScrape?: boolean;
 }
 
 // ─── Bot Documents ─────────────────────────────────────────────────────────────

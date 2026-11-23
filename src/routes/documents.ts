@@ -8,6 +8,7 @@ import { queueIngestionJob } from '../lib/sqs.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { HonoEnv } from '../types/index.js';
 import websitePagesRouter from './website-pages.js';
+import { websiteUrlSchema } from '../lib/website-url.js';
 
 const router = new Hono<HonoEnv>();
 
@@ -38,6 +39,7 @@ router.get('/', async (c) => {
     scrapedAt: websiteData.scrapedAt ?? null,
     pageCount: websiteData.pages?.length ?? null,
     failedPageCount: websiteData.pages?.filter(page => page.status === 'failed').length ?? 0,
+    needsScrape: websiteData.needsScrape ?? false,
   })) });
 });
 
@@ -154,10 +156,7 @@ router.post('/:id/confirm', async (c) => {
 // POST /api/documents/scrape-url — add a website URL as a knowledge source
 const scrapeUrlSchema = z.object({
   botId: z.string().uuid(),
-  url: z.string().url().max(2048).refine((value) => {
-    try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }
-    catch { return false; }
-  }, 'Use a public http or https website address without login details'),
+  url: websiteUrlSchema,
   name: z.string().trim().min(1).max(200).optional(), // display name, defaults to the URL
   maxPages: z.number().int().min(1).max(1000).default(30),
 });
