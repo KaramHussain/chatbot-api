@@ -36,7 +36,9 @@ export async function getActiveBot(botId: string): Promise<Bot | undefined> {
     .from(bots)
     .where(and(eq(bots.id, botId), eq(bots.status, 'active')))
     .limit(1);
-  return bot;
+  if (!bot) return undefined;
+  const [tenant] = await db.select({ status: tenants.status }).from(tenants).where(eq(tenants.id, bot.tenantId));
+  return tenant?.status === 'active' ? bot : undefined;
 }
 
 /** Domain lock: an empty allow-list means the bot may be embedded anywhere. */

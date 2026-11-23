@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { tenantIsActive } from '../../middleware/auth.js';
 import { bots, db } from '../../db/index.js';
 import { jsonBody } from '../../lib/validation.js';
 import { tenantHasBooking } from '../entitlements.js';
@@ -37,7 +38,7 @@ export async function resolvePublicBot(ref: string): Promise<{ bot: BotRow; sett
     botId = row.botId;
   }
   const [bot] = await db.select().from(bots).where(and(eq(bots.id, botId), eq(bots.status, 'active'))).limit(1);
-  if (!bot) return null;
+  if (!bot || !(await tenantIsActive(bot.tenantId))) return null;
   const settings = await getSettings(bot.id);
   if (!settings?.enabled || !(await tenantHasBooking(bot.tenantId)) || !(await isBookingReady(settings))) return null;
   return { bot, settings };

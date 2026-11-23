@@ -74,6 +74,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
+  username: text('username'),
   passwordHash: text('password_hash'), // null for Google-only accounts
   googleId: text('google_id'), // Google "sub" claim, set the first time this email logs in via Google
   name: text('name').notNull(),
@@ -82,7 +83,18 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_idx').on(t.email),
+  usernameIdx: uniqueIndex('users_username_idx').on(t.username),
 }));
+
+// Deliberately no cascading foreign keys: retain attribution after account deletion.
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorId: uuid('actor_id').notNull(),
+  tenantId: uuid('tenant_id'),
+  action: text('action').notNull(),
+  resource: text('resource').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({ tenantTimeIdx: index('admin_audit_tenant_time_idx').on(t.tenantId, t.createdAt) }));
 
 // ─── Bots ──────────────────────────────────────────────────────────────────────
 // One tenant can have multiple bots (e.g. one per website section)

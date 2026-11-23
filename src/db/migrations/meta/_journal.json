@@ -36,6 +36,13 @@
       "when": 1795392000000,
       "tag": "0010_website_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795446000000,
+      "tag": "0011_admin_management",
+      "breakpoints": true
     }
   ]
 }

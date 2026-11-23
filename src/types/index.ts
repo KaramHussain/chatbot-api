@@ -16,6 +16,7 @@ export interface JwtPayload {
 
 // Attached to Hono context by auth middleware
 export interface AuthUser {
+  username?: string | null;
   id: string;           // DB user UUID
   email: string;
   name: string;

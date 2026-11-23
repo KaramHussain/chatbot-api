@@ -86,6 +86,11 @@ const createBotSchema = z.object({
 router.post('/', jsonBody(createBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const body = c.req.valid('json');
+  if (body.tenantThemeId) {
+    const [theme] = await db.select({ id: tenantThemes.id }).from(tenantThemes)
+      .where(and(eq(tenantThemes.id, body.tenantThemeId), eq(tenantThemes.tenantId, tenantId)));
+    if (!theme) return c.json({ error: 'Theme not found in this account' }, 404);
+  }
 
   const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
   const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
@@ -242,6 +247,11 @@ router.put('/:id', jsonBody(updateBotSchema), async (c) => {
   const tenantId = c.get('tenantId');
   const { id } = c.req.param();
   const body = c.req.valid('json');
+  if (body.tenantThemeId) {
+    const [theme] = await db.select({ id: tenantThemes.id }).from(tenantThemes)
+      .where(and(eq(tenantThemes.id, body.tenantThemeId), eq(tenantThemes.tenantId, tenantId)));
+    if (!theme) return c.json({ error: 'Theme not found in this account' }, 404);
+  }
 
   if (body.leadCaptureEnabled || body.status === 'active') {
     const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);

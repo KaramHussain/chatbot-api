@@ -14,7 +14,7 @@ app.use(
   '*',
   cors({
     origin: '*',
-    allowHeaders: ['Content-Type', 'Authorization', 'x-preset-name'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'x-preset-name'],
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Length'],
   })

@@ -9,7 +9,7 @@ const router = new Hono<HonoEnv>();
 
 // DELETE /api/account/data — wipe RAG/conversation data, keep account
 router.delete('/data', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
 
   await db.delete(botChunks).where(eq(botChunks.tenantId, user.tenantId));
@@ -21,7 +21,8 @@ router.delete('/data', async (c) => {
 
 // DELETE /api/account — delete own account + all associated data
 router.delete('/', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
+  if (user.role === 'client_user') return c.json({ error: 'Only account owners can delete this account' }, 403);
   if (!user.tenantId) return c.json({ error: 'Only tenant admins can delete their account' }, 400);
 
   // Delete tenant → cascades to bots, documents, chunks, conversations, messages, users
@@ -32,14 +33,14 @@ router.delete('/', async (c) => {
 
 // GET /api/account/entitlements — which gated features this tenant may use (drives dashboard visibility)
 router.get('/entitlements', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
   return c.json({ entitlements: await entitlementsFor(user.tenantId) });
 });
 
 // GET /api/account/settings — return tenant settings for this user
 router.get('/settings', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
 
   const [tenant] = await db.select({
@@ -62,7 +63,7 @@ router.get('/settings', async (c) => {
 
 // POST /api/account/plan — switch subscription tier (no payment gateway yet: activates immediately)
 router.post('/plan', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
 
   const body = await c.req.json<{ plan?: string }>();
@@ -104,7 +105,7 @@ router.post('/plan', async (c) => {
 
 // PATCH /api/account/settings — tenant can update their own session duration
 router.patch('/settings', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
 
   const body = await c.req.json<{ sessionDurationMinutes?: number }>();
@@ -123,7 +124,7 @@ router.patch('/settings', async (c) => {
 
 // GET /api/account/analytics — 30-day daily conversation + lead counts across all bots
 router.get('/analytics', async (c) => {
-  const user = c.get('user');
+  const user = { ...c.get('user'), tenantId: c.get('tenantId') };
   if (!user.tenantId) return c.json({ error: 'No tenant' }, 400);
 
   const since = new Date();

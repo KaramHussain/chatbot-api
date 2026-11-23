@@ -46,7 +46,7 @@ router.get('/:botId', async (c) => {
     })
     .from(bots)
     .innerJoin(tenants, eq(bots.tenantId, tenants.id))
-    .where(and(eq(bots.id, botId), eq(bots.status, 'active')))
+    .where(and(eq(bots.id, botId), eq(bots.status, 'active'), eq(tenants.status, 'active')))
     .limit(1);
 
   if (!row) return c.json({ error: 'Bot not found' }, 404);

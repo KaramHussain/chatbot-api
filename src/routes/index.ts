@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { authMiddleware, requireSuperAdmin, requireTenant } from '../middleware/auth.js';
+import { authMiddleware, requireSuperAdmin, requireTenant, auditAdminActions } from '../middleware/auth.js';
 import authRouter from './auth.js';
 import registerRouter from './register.js';
 import adminTenantsRouter from './admin/tenants.js';
@@ -36,6 +36,7 @@ api.route('/logos', logosRouter);
 // ─── Authenticated routes ──────────────────────────────────────────────────────
 const protected_ = new Hono<HonoEnv>();
 protected_.use('*', authMiddleware);
+protected_.use('*', auditAdminActions);
 
 // Super-admin only
 protected_
@@ -49,6 +50,7 @@ protected_
   .use('/bots/*', requireTenant)
   .use('/documents/*', requireTenant)
   .use('/themes/*', requireTenant)
+  .use('/account/*', requireTenant)
   // Bookings (owner dashboard API) — gated by the plan/feature switch.
   .use('/bots/:id/booking/*', requireBookingFeature as never)
   .route('/bots/:id/booking', bookingOwnerRouter)

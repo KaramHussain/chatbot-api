@@ -13,7 +13,7 @@ if (!process.env.DATABASE_URL?.includes('localhost:55432')) throw new Error('Use
 const tenantId = randomUUID();
 const botId = randomUUID();
 const page = { url: 'https://example.com/about', title: 'About us', status: 'ready' as const, updatedAt: '2026-11-01T12:00:00.000Z' };
-function appFor(tenant = tenantId) {
+function appFor(tenant: string = tenantId) {
   const app = new Hono<HonoEnv>();
   app.use('*', async (c, next) => { c.set('tenantId', tenant); await next(); });
   app.route('/documents', documentsRouter);
@@ -68,7 +68,7 @@ describe('website knowledge', () => {
     expect(await db.execute(sql`SELECT id FROM bot_chunks WHERE document_id=${doc.id}`)).toHaveLength(0);
     expect(await db.execute(sql`SELECT id FROM bot_chunks WHERE document_id=${other.id}`)).toHaveLength(1);
     expect(queue).not.toHaveBeenCalled();
-    const listing = await (await appFor().request(`/documents?botId=${botId}`)).json();
+    const listing: any = await (await appFor().request(`/documents?botId=${botId}`)).json();
     expect(listing.documents.find((item: { id: string }) => item.id === doc.id)).toMatchObject({ needsScrape: true, pageCount: 0 });
     expect((await appFor().request(`/documents/${doc.id}/rescrape`, { method: 'POST' })).status).toBe(202);
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({ documentId: doc.id, sourceUrl: saved.sourceUrl }));
@@ -107,7 +107,7 @@ describe('website knowledge', () => {
   it('stores the original crawl settings when adding a website', async () => {
     const response = await appFor().request('/documents/scrape-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botId, url: 'https://example.com', name: 'Our website', maxPages: 200 }) });
     expect(response.status).toBe(201);
-    const { documentId } = await response.json();
+    const { documentId } = await response.json() as { documentId: string };
     const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, documentId));
     expect(saved.websiteData).toMatchObject({ maxPages: 200, jobId: expect.any(String) });
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({ documentId, maxPages: 200, jobId: saved.websiteData.jobId }));
@@ -130,7 +130,7 @@ describe('website knowledge', () => {
     for (const metadata of [{ page_url: page.url, page_title: page.title }, { page_url: page.url, page_title: page.title }, { page_url: 'https://example.com', page_title: 'Site Index', is_index: true }]) {
       await db.execute(sql`INSERT INTO bot_chunks (document_id, bot_id, tenant_id, content, chunk_index, metadata, embedding) VALUES (${doc.id}, ${botId}, ${tenantId}, 'test', 0, ${JSON.stringify(metadata)}::jsonb, ${JSON.stringify(Array(1024).fill(0))}::vector)`);
     }
-    const body = await (await appFor().request(`/documents/${doc.id}/pages`)).json();
+    const body: any = await (await appFor().request(`/documents/${doc.id}/pages`)).json();
     expect(body.pages).toHaveLength(1);
     expect(body.pages[0]).toMatchObject({ title: page.title, url: page.url, status: 'ready' });
   });
@@ -192,11 +192,11 @@ describe('website knowledge', () => {
     const many = Array.from({ length: 63 }, (_, i) => ({ ...page, title: `Page ${i}`, url: `https://example.com/page-${i}`, status: i === 62 ? 'failed' as const : 'ready' as const, error: i === 62 ? 'HTTP 503 Service Unavailable' : null }));
     const doc = await website({ websiteData: { pages: many } });
     const app = appFor();
-    const first = await (await app.request(`/documents/${doc.id}/pages`)).json();
+    const first: any = await (await app.request(`/documents/${doc.id}/pages`)).json();
     expect(first.pages).toHaveLength(25); expect(first.totalPages).toBe(3); expect(first.summary.failed).toBe(1);
-    const last = await (await app.request(`/documents/${doc.id}/pages?page=3`)).json();
+    const last: any = await (await app.request(`/documents/${doc.id}/pages?page=3`)).json();
     expect(last.pages).toHaveLength(13);
-    const filtered = await (await app.request(`/documents/${doc.id}/pages?status=failed&search=62`)).json();
+    const filtered: any = await (await app.request(`/documents/${doc.id}/pages?status=failed&search=62`)).json();
     expect(filtered.pages).toHaveLength(1); expect(filtered.pages[0].error).toBe('HTTP 503 Service Unavailable');
   });
   it('rejects foreign, unknown and busy page mutations', async () => {
