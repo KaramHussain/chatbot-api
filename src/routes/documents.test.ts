@@ -35,6 +35,15 @@ afterAll(async () => {
 });
 
 describe('website knowledge', () => {
+  it('website refresh discovers beyond an old one-page crawl limit', async () => {
+    const doc = await website({ websiteData: { maxPages: 1, pages: [page], activePageUrl: page.url } });
+    const response = await appFor().request(`/documents/${doc.id}/rescrape`, { method: 'POST' });
+    expect(response.status).toBe(202);
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ maxPages: 30 }));
+    expect(queue.mock.calls[0][0]).not.toHaveProperty('pageUrl');
+    const [saved] = await db.select().from(botDocuments).where(eq(botDocuments.id, doc.id));
+    expect(saved.websiteData.activePageUrl).toBeNull();
+  });
   const patch = (app: ReturnType<typeof appFor>, id: string, data: unknown) => app.request(`/documents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   it('renames a website without scraping or changing its saved knowledge by default', async () => {
     const data = { maxPages: 50, jobId: randomUUID(), pages: [page], excludedUrls: ['https://example.com/excluded'], scrapedAt: page.updatedAt };

@@ -67,7 +67,9 @@ async function schedule(id: string, tenantId: string, pageUrl?: string, edit?: z
     const pages = await websitePages(updatedDoc);
     if (pageUrl && !pages.some(page => page.url === pageUrl)) return { error: 'Webpage not found', code: 404 } as const;
     const jobId = randomUUID();
-    const maxPages = Math.min(1000, Math.max(baseData.maxPages ?? 30, pages.length));
+    // A website refresh must have room to discover pages even after an old
+    // one-page import. The page retry path remains explicitly page-scoped.
+    const maxPages = Math.min(1000, Math.max(baseData.maxPages ?? 30, pages.length, pageUrl ? 1 : 30));
     const websiteData = { ...baseData, jobId, maxPages, activePageUrl: pageUrl ?? null, needsScrape: false, pages: pages.map(page => !pageUrl || page.url === pageUrl ? { ...page, status: 'processing' as const, error: null, updatedAt: new Date().toISOString() } : page) };
     await tx.update(botDocuments).set({ name: updatedDoc.name, sourceUrl: updatedDoc.sourceUrl, websiteData, status: 'processing', errorMessage: null, ...(urlChanged ? { chunkCount: 0 } : {}), updatedAt: new Date() }).where(eq(botDocuments.id, id));
     return { doc: updatedDoc, websiteData, jobId, maxPages };
