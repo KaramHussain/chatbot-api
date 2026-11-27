@@ -42,6 +42,7 @@ router.get('/:botId', async (c) => {
       voiceEnabled: bots.voiceEnabled,
       windowSize: bots.windowSize,
       voiceUiStyle: bots.voiceUiStyle,
+      linkStyle: bots.linkStyle,
       voiceId: bots.voiceId,
       voiceIntro: bots.voiceIntro,
       sessionDurationMinutes: tenants.sessionDurationMinutes,

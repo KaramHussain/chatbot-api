@@ -163,6 +163,10 @@ export const bots = pgTable('bots', {
   voiceIntro: text('voice_intro'), // what the orb says/greets when voice mode opens (null = default)
   windowSize: text('window_size').default('standard').notNull(),
   voiceUiStyle: text('voice_ui_style').default('fullscreen').notNull(), // 'fullscreen' | 'inline'
+  // How links in chat replies are displayed: 'plain' (raw URL text), 'text-link' (underlined label,
+  // current default), or 'button' (rounded pill button) — text-chat rendering only, voice mode
+  // always speaks/shows bare URLs regardless of this setting.
+  linkStyle: text('link_style').default('text-link').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
