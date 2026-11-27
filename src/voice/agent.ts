@@ -4,7 +4,7 @@
 //
 // This module is the job entrypoint loaded by the worker (see worker.ts). It must stay free of
 // side effects at import time — the worker imports it in every job process.
-import { type JobContext, type JobProcess, defineAgent, llm, log, tts, voice } from '@livekit/agents';
+import { type JobContext, type JobProcess, defineAgent, llm, log, tokenize, tts, voice } from '@livekit/agents';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as silero from '@livekit/agents-plugin-silero';
 import {
@@ -36,7 +36,7 @@ export default defineAgent<ProcData>({
 
   entry: async (ctx: JobContext<ProcData>) => {
     const logger = log().child({ room: ctx.room.name });
-    const { botId, conversationId } = decodeJobMetadata(ctx.job.metadata);
+    const { botId, conversationId, manualTurn } = decodeJobMetadata(ctx.job.metadata);
 
     const bot = await getActiveBot(botId);
     if (!bot || !bot.voiceEnabled) {
@@ -79,16 +79,17 @@ export default defineAgent<ProcData>({
       llm: new BedrockRagLLM(brain),
       // Carry sentence timestamps derived from the synthesized audio frames into LiveKit's
       // caption synchronizer. Aura's native streaming output supplies no alignment.
-      tts: new tts.StreamAdapter(new SpokenTTS({ model: resolveVoice(bot.voiceId) })),
+      tts: new tts.StreamAdapter(new SpokenTTS({ model: resolveVoice(bot.voiceId) }),
+        new tokenize.blingfire.SentenceTokenizer({ retainFormat: true, firstTokenLength: 18, minTokenLength: 100, maxTokenLength: 240 })),
       // Never read links/emails/phone numbers aloud (they stay in the on-screen captions).
       ttsTextTransforms: [],
       turnHandling: {
-        turnDetection: 'stt',
+        turnDetection: manualTurn ? 'manual' : 'stt',
         endpointing: {
           minDelay: TURN_TUNING.minEndpointingDelayMs,
           maxDelay: TURN_TUNING.maxEndpointingDelayMs,
         },
-        interruption: { enabled: true, mode: 'vad', minDuration: TURN_TUNING.minInterruptionMs },
+        interruption: { enabled: !manualTurn, mode: 'vad', minDuration: TURN_TUNING.minInterruptionMs },
       },
     });
 
@@ -100,6 +101,9 @@ export default defineAgent<ProcData>({
       if (item.type !== 'message' || (item.role !== 'user' && item.role !== 'assistant')) return;
       const text = item.textContent ?? '';
       recorder.record(item.role, text);
+      if (manualTurn && item.role === 'user' && text.trim()) {
+        ctx.room.localParticipant?.sendText(text, { topic: 'cg.user' }).catch(err => logger.warn({ err }, 'user transcript delivery failed'));
+      }
       // Hand the widget the complete committed reply — links included. The live captions are paced
       // to speech and can't be relied on to carry an unspoken link at the end of a reply.
       if (item.role === 'assistant' && text.trim()) {
@@ -119,6 +123,18 @@ export default defineAgent<ProcData>({
       inputOptions: { closeOnDisconnect: true, deleteRoomOnClose: true },
       outputOptions: { transcriptionEnabled: true, syncTranscription: true },
     });
+    if (manualTurn) {
+      let submitted = false;
+      ctx.room.localParticipant?.registerRpcMethod('cg.submit', async ({ payload }) => {
+        const text = payload.trim();
+        if (!text) throw new Error('The recording is empty');
+        if (!submitted) {
+          session.generateReply({ userInput: text, inputModality: 'audio', allowInterruptions: false });
+          submitted = true;
+        }
+        return 'ok';
+      });
+    }
     logger.info({ botId, conversationId }, 'voice session started');
   },
 });

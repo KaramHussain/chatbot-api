@@ -19,6 +19,7 @@ const router = new Hono();
 const sessionSchema = z.object({
   botId: z.string().uuid(),
   conversationId: z.string().uuid().optional(),
+  manualTurn: z.boolean().optional(),
   visitorId: z.string().max(100).optional(),
 });
 
@@ -46,7 +47,7 @@ router.post('/session', zValidator('json', sessionSchema), async (c) => {
   });
 
   try {
-    const session = await createVoiceSession({ botId: bot.id, conversationId, visitorId: body.visitorId });
+    const session = await createVoiceSession({ botId: bot.id, conversationId, visitorId: body.visitorId, manualTurn: body.manualTurn });
     c.header('Cache-Control', 'no-store');
     return c.json({ serverUrl: session.serverUrl, participantToken: session.participantToken, conversationId });
   } catch (err) {

@@ -8,6 +8,7 @@ import { getVoiceConfig, JOIN_TOKEN_TTL } from './config.js';
 export interface VoiceJobMetadata {
   botId: string;
   conversationId: string;
+  manualTurn?: boolean;
 }
 
 export function encodeJobMetadata(meta: VoiceJobMetadata): string {
@@ -21,7 +22,7 @@ export function decodeJobMetadata(raw: string | undefined): VoiceJobMetadata {
   if (typeof m?.botId !== 'string' || typeof m?.conversationId !== 'string') {
     throw new Error('Voice job metadata is missing botId/conversationId');
   }
-  return { botId: m.botId, conversationId: m.conversationId };
+  return { botId: m.botId, conversationId: m.conversationId, ...(m.manualTurn === true ? { manualTurn: true } : {}) };
 }
 
 export interface VoiceSession {
@@ -34,6 +35,7 @@ export async function createVoiceSession(params: {
   botId: string;
   conversationId: string;
   visitorId?: string;
+  manualTurn?: boolean;
 }): Promise<VoiceSession> {
   const cfg = getVoiceConfig();
   // Unguessable per-call room: nobody else can join, and nothing is shared between calls.
@@ -52,7 +54,7 @@ export async function createVoiceSession(params: {
     agents: [
       new RoomAgentDispatch({
         agentName: cfg.agentName,
-        metadata: encodeJobMetadata({ botId: params.botId, conversationId: params.conversationId }),
+        metadata: encodeJobMetadata({ botId: params.botId, conversationId: params.conversationId, manualTurn: params.manualTurn }),
       }),
     ],
   });
