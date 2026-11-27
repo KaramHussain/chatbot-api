@@ -77,30 +77,19 @@ await client`
 // existing tenant. Clear it only where it still exactly matches one of those old static defaults —
 // a tenant an admin deliberately pointed at something else keeps that custom choice.
 await client`CREATE TABLE IF NOT EXISTS plan_model_migrations (name text PRIMARY KEY)`;
-const ranAiModelClear = await client`INSERT INTO plan_model_migrations (name) VALUES ('clear_inherited_ai_model_defaults') ON CONFLICT DO NOTHING RETURNING name`;
+// _v2: the original run of this (same name, no suffix) was immediately undone in the same migrate
+// run by the old "Plan models" block below it, which has since been removed — re-running it now
+// actually sticks.
+const ranAiModelClear = await client`INSERT INTO plan_model_migrations (name) VALUES ('clear_inherited_ai_model_defaults_v2') ON CONFLICT DO NOTHING RETURNING name`;
 if (ranAiModelClear.length) {
   await client`UPDATE tenants SET ai_model = NULL WHERE ai_model IN ('us.amazon.nova-2-lite-v1:0', 'mistral.mistral-large-3-675b-instruct')`;
 }
 console.log('Plan model config ready.');
 
-// Plan models (Oct 31 2026): Free = Nova 2 Lite, Growth/Business = Mistral Large 3.
-// Tenants still on a previous plan default move to their plan's model; custom admin picks are kept.
-await client`ALTER TABLE tenants ALTER COLUMN ai_model SET DEFAULT 'us.amazon.nova-2-lite-v1:0'`;
-await client`
-  UPDATE tenants SET ai_model = CASE plan
-    WHEN 'starter' THEN 'us.amazon.nova-2-lite-v1:0'
-    WHEN 'growth' THEN 'mistral.mistral-large-3-675b-instruct'
-    WHEN 'enterprise' THEN 'mistral.mistral-large-3-675b-instruct'
-  END
-  WHERE ai_model IS NULL OR ai_model IN (
-    'amazon.nova-lite-v1:0', 'amazon.nova-pro-v1:0',
-    'mistral.mistral-large-3-675b-instruct', 'us.anthropic.claude-opus-4-5-20251101-v1:0'
-  )`;
-await client`UPDATE bots SET llm_model = NULL WHERE llm_model = 'us.anthropic.claude-opus-4-5-20251101-v1:0'`;
-// Claude removed (Oct 31 2026 — Bedrock Marketplace billing blocked): Business → Mistral Large 3.
-await client`UPDATE tenants SET ai_model = 'mistral.mistral-large-3-675b-instruct' WHERE ai_model = 'us.anthropic.claude-haiku-4-5-20251001-v1:0'`;
-await client`UPDATE bots SET llm_model = NULL WHERE llm_model LIKE '%anthropic.claude%'`;
-console.log('Plan models ready.');
+// (Removed Nov 27 2026: the old "Plan models (Oct 31 2026)" block used to re-stamp every tenant's
+// ai_model with a static per-plan default on every single migrate run — including whenever it was
+// NULL, which is exactly the "follow the plan dynamically" state the block above now relies on. It
+// was undoing the one-time clear above in the very same run. Superseded by plan_model_config.)
 
 // Bookings feature (idempotent DDL)
 for (const stmt of BOOKING_DDL) await client.unsafe(stmt);
