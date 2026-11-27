@@ -4,7 +4,7 @@
 //
 // This module is the job entrypoint loaded by the worker (see worker.ts). It must stay free of
 // side effects at import time — the worker imports it in every job process.
-import { type JobContext, type JobProcess, defineAgent, llm, log, voice } from '@livekit/agents';
+import { type JobContext, type JobProcess, defineAgent, llm, log, tts, voice } from '@livekit/agents';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as silero from '@livekit/agents-plugin-silero';
 import {
@@ -77,7 +77,9 @@ export default defineAgent<ProcData>({
         endpointing: TURN_TUNING.sttEndpointingMs,
       }),
       llm: new BedrockRagLLM(brain),
-      tts: new deepgram.TTS({ model: resolveVoice(bot.voiceId) }),
+      // Carry sentence timestamps derived from the synthesized audio frames into LiveKit's
+      // caption synchronizer. Aura's native streaming output supplies no alignment.
+      tts: new tts.StreamAdapter(new deepgram.TTS({ model: resolveVoice(bot.voiceId) })),
       // Never read links/emails/phone numbers aloud (they stay in the on-screen captions).
       ttsTextTransforms: [speakableText, 'filter_markdown', 'filter_emoji'],
       turnHandling: {
