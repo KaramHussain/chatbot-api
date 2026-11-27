@@ -115,6 +115,13 @@ function findRule(index: Map<string, RuleIndexEntry[]>, url: string): LinkRule |
   return entries.find((e) => e.path && (candidate.path === e.path || candidate.path.startsWith(`${e.path}/`)))?.rule;
 }
 
+// The model sometimes writes a bracketed caption right before a bare URL instead of proper
+// markdown link syntax — "[PropStream Affiliate Link] https://..." with no parentheses — which
+// the widget can't connect: the bracket renders as dangling literal text and the URL becomes its
+// own separate link. Normalize that shape into real markdown `[label](url)` first, so the main
+// pass below sees one clean link instead of two disconnected pieces.
+const DANGLING_LABEL_RE = /\[([^\]\n]{1,120})\]:?\s+((?:https?:\/\/|www\.)[^\s<>"'`)]+)/gi;
+
 /**
  * Rewrites any recognized link in `text` to its configured target URL, in place. A markdown link
  * keeps whatever label the model wrote (e.g. "[TEKCE Dubai Properties](...)"); a bare URL — which
@@ -124,7 +131,8 @@ function findRule(index: Map<string, RuleIndexEntry[]>, url: string): LinkRule |
 export function rewriteLinkRules(text: string, rules: LinkRule[]): string {
   if (!rules.length) return text;
   const index = buildIndex(rules);
-  return text.replace(LINK_RE, (match, mdLabel, mdUrl) => {
+  const normalized = text.replace(DANGLING_LABEL_RE, (match, label, url) => (findRule(index, url) ? `[${label}](${url})` : match));
+  return normalized.replace(LINK_RE, (match, mdLabel, mdUrl) => {
     const url = mdUrl ?? match;
     const rule = findRule(index, url);
     if (!rule) return match;
