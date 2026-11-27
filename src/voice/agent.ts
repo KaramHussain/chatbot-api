@@ -21,7 +21,7 @@ import { resolveVoice } from '../lib/deepgram.js';
 import { BedrockRagLLM, type VoiceBrain } from './bedrock-rag-llm.js';
 import { REPLY_TOPIC, TURN_TUNING } from './config.js';
 import { decodeJobMetadata } from './session.js';
-import { speakableText } from './speech-text.js';
+import { SpokenTTS } from './spoken-tts.js';
 import { TranscriptRecorder } from './transcript-recorder.js';
 
 interface ProcData {
@@ -79,9 +79,9 @@ export default defineAgent<ProcData>({
       llm: new BedrockRagLLM(brain),
       // Carry sentence timestamps derived from the synthesized audio frames into LiveKit's
       // caption synchronizer. Aura's native streaming output supplies no alignment.
-      tts: new tts.StreamAdapter(new deepgram.TTS({ model: resolveVoice(bot.voiceId) })),
+      tts: new tts.StreamAdapter(new SpokenTTS({ model: resolveVoice(bot.voiceId) })),
       // Never read links/emails/phone numbers aloud (they stay in the on-screen captions).
-      ttsTextTransforms: [speakableText, 'filter_markdown', 'filter_emoji'],
+      ttsTextTransforms: [],
       turnHandling: {
         turnDetection: 'stt',
         endpointing: {
