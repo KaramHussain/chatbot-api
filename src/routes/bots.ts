@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { jsonBody } from '../lib/validation.js';
 import { z } from 'zod';
-import { db, bots, botChunks, botDocuments, conversations, messages, tenants, tenantThemes } from '../db/index.js';
+import { db, bots, botChunks, botDocuments, botLinkRules, conversations, messages, tenants, tenantThemes } from '../db/index.js';
+import { setBotLinkRules } from '../lib/linkRules.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
 import { putObject, buildLogoKey, copyObject } from '../lib/s3.js';
 import sharp from 'sharp';
@@ -357,6 +358,40 @@ router.delete('/:id/knowledge', async (c) => {
   await db.delete(botChunks).where(and(eq(botChunks.botId, id), eq(botChunks.tenantId, tenantId)));
   await db.delete(botDocuments).where(and(eq(botDocuments.botId, id), eq(botDocuments.tenantId, tenantId)));
   return c.json({ success: true });
+});
+
+// GET /api/bots/:id/link-rules — domain → URL rewrite rules for this bot
+router.get('/:id/link-rules', async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  const rows = await db.select().from(botLinkRules).where(eq(botLinkRules.botId, id)).orderBy(asc(botLinkRules.matchDomain));
+  return c.json({ rules: rows.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
+});
+
+// PUT /api/bots/:id/link-rules — replace the full rule set in one call
+const linkRulesSchema = z.object({
+  rules: z.array(z.object({
+    matchDomain: z.string().trim().min(1).max(255),
+    targetUrl: z.string().trim().url().max(2000),
+    label: z.string().trim().max(100).nullable().optional(),
+  })).max(500),
+});
+router.put('/:id/link-rules', jsonBody(linkRulesSchema), async (c) => {
+  const tenantId = c.get('tenantId');
+  const { id } = c.req.param();
+  const { rules } = c.req.valid('json');
+
+  const [bot] = await db.select({ id: bots.id }).from(bots)
+    .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+  if (!bot) return c.json({ error: 'Not found' }, 404);
+
+  const saved = await setBotLinkRules(id, rules);
+  return c.json({ rules: saved.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
 });
 
 const VALID_IMAGE_TYPES: Record<string, string> = {

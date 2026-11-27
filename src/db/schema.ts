@@ -217,6 +217,23 @@ export const botDocuments = pgTable('bot_documents', {
   statusIdx: index('bot_documents_status_idx').on(t.status),
 }));
 
+// ─── Bot Link Rules ─────────────────────────────────────────────────────────────
+// Deterministic domain → URL rewrite applied to every bot reply server-side — never left to the
+// LLM to reproduce from memory. General-purpose: affiliate/referral codes, UTM-tagged tracking
+// links, a rebranded short-link domain, or redirecting a vendor's site to a completely different
+// URL. Per bot, opt-in — a bot with no rules behaves exactly as before.
+export const botLinkRules = pgTable('bot_link_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+  matchDomain: text('match_domain').notNull(), // hostname to match (with or without 'www.'), e.g. 'resimpli.com'
+  targetUrl: text('target_url').notNull(),     // URL to substitute in, in place of any matching link
+  label: text('label'), // optional display name for the admin UI, e.g. 'REsimpli'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  botDomainIdx: uniqueIndex('bot_link_rules_bot_domain_idx').on(t.botId, t.matchDomain),
+}));
+
 // ─── Bot Chunks (Vector Store) ─────────────────────────────────────────────────
 // Each document is split into ~512-token chunks, each chunk has an embedding vector
 export const botChunks = pgTable('bot_chunks', {

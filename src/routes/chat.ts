@@ -5,6 +5,7 @@ import { db, conversations, messages } from '../db/index.js';
 import { eq, asc } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { streamChat } from '../lib/bedrock.js';
+import { getBotLinkRules, rewriteLinkRules } from '../lib/linkRules.js';
 import { Stopwatch } from '../lib/stopwatch.js';
 import { getSettings, isBookingReady } from '../booking/core.js';
 import { tenantHasBooking } from '../booking/entitlements.js';
@@ -156,8 +157,14 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
         await send({ type: 'chunk', text: fullResponse });
       }
 
-      // Tell the widget we're done first (with sources for the citation UI), then persist.
-      await send({ type: 'done', sources: sources.map((s) => ({ documentName: s.documentName, score: s.score })) });
+      // Swap any link matching this bot's configured rules for its target URL — deterministic,
+      // so correctness never depends on the model reproducing a long tracking URL from memory,
+      // or on retrieval happening to surface the right knowledge-base chunk.
+      const linkRules = await getBotLinkRules(bot.id);
+      fullResponse = rewriteLinkRules(fullResponse, linkRules);
+
+      // Tell the widget we're done first (with the rewritten text + sources for the citation UI), then persist.
+      await send({ type: 'done', text: fullResponse, sources: sources.map((s) => ({ documentName: s.documentName, score: s.score })) });
       timing.mark('done');
       // One structured line per request, so latency can be diagnosed from the logs.
       console.log(JSON.stringify({ evt: 'chat_timing', botId: bot.id, model: modelId ?? 'default', voice: !!body.voice, booking: bookingOn, ...timing.toJSON() }));
