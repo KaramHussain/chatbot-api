@@ -153,7 +153,9 @@ router.post('/', jsonBody(createTenantSchema), async (c) => {
         plan: body.plan,
         monthlyMessageLimit: plan.monthlyMessageLimit,
         monthlyTokenBudget: plan.monthlyTokenBudget,
-        aiModel: body.aiModel ?? plan.aiModel,
+        // null = follow the plan's admin-configured model chain dynamically (lib/planModels.ts);
+        // only set when the admin explicitly picked a model for this one tenant.
+        aiModel: body.aiModel ?? null,
       })
       .returning();
 

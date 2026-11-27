@@ -3,6 +3,7 @@ import {
   InvokeModelCommand,
   ConverseCommand,
   ConverseStreamCommand,
+  type ConverseStreamCommandOutput,
   type Message as BedrockMessage,
 } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockAwsConfig } from './aws.js';
@@ -44,7 +45,8 @@ export interface StreamChatOptions {
   systemPrompt?: string;
   history: ChatMessage[];
   userMessage: string;
-  modelId?: string;
+  /** A single model id, or an ordered fallback chain (tried in order on AccessDeniedException). */
+  modelId?: string | string[];
   onTokenUsage?: (inputTokens: number, outputTokens: number) => void;
   /** Aborts the Bedrock request (e.g. the user interrupted the voice agent). */
   signal?: AbortSignal;
@@ -69,35 +71,60 @@ export function toConverseMessages(history: ChatMessage[], userMessage: string):
   return turns.map((m) => ({ role: m.role, content: [{ text: m.content }] }));
 }
 
-/**
- * Model used when a plan's model is not available to the AWS account — e.g. a Claude model whose
- * AWS Marketplace subscription hasn't completed — so a chat never fails because of model access.
- */
-const FALLBACK_MODEL = 'mistral.mistral-large-3-675b-instruct';
 /** After a denial, skip the denied model for this long (avoids a wasted round-trip per message). */
 const DENIED_RETRY_MS = 5 * 60_000;
 const deniedUntil = new Map<string, number>();
 
 export type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
+export interface ConverseStreamResult {
+  response: ConverseStreamCommandOutput;
+  /** Which model in the chain actually served this (for logging/cost attribution). */
+  modelId: string;
+}
 
-export async function openConverseStream(modelId: string, input: ConverseStreamInput, signal?: AbortSignal) {
-  if (modelId !== FALLBACK_MODEL && (deniedUntil.get(modelId) ?? 0) <= Date.now()) {
+/**
+ * Tries each model in `chain` in order (deduplicated by the caller) — e.g. [opus, mistral, nova].
+ * Falls through to the next one only on AccessDeniedException (a plan's model not entitled to this
+ * AWS account, e.g. a pending Bedrock Marketplace subscription) so a chat never fails outright
+ * because of model access; any other error (validation, throttling, etc.) is thrown immediately so
+ * it isn't silently masked as "model unavailable". `input` may depend on which model is actually
+ * being tried (e.g. forced-tool-use shape differs by provider) — pass a function for that.
+ */
+export async function openConverseStream(
+  chain: string[],
+  input: ConverseStreamInput | ((modelId: string) => ConverseStreamInput),
+  signal?: AbortSignal,
+): Promise<ConverseStreamResult> {
+  const buildInput = typeof input === 'function' ? input : () => input;
+  const models = chain.length ? chain : [LLM_MODEL];
+  let lastErr: Error | undefined;
+
+  for (let i = 0; i < models.length; i++) {
+    const modelId = models[i];
+    const isLast = i === models.length - 1;
+    // Always give the last model in the chain a real attempt, even if it was recently denied —
+    // it's the end of the line, so there's nowhere else to fall back to.
+    if (!isLast && (deniedUntil.get(modelId) ?? 0) > Date.now()) continue;
     try {
-      return await client.send(new ConverseStreamCommand({ ...input, modelId }), { abortSignal: signal });
+      const response = await client.send(new ConverseStreamCommand({ ...buildInput(modelId), modelId }), { abortSignal: signal });
+      return { response, modelId };
     } catch (err) {
-      if ((err as Error).name !== 'AccessDeniedException') throw err;
+      lastErr = err as Error;
+      if ((err as Error).name !== 'AccessDeniedException' || isLast) throw err;
       deniedUntil.set(modelId, Date.now() + DENIED_RETRY_MS);
       console.warn(JSON.stringify({
-        evt: 'model_fallback', modelId, fallback: FALLBACK_MODEL, reason: (err as Error).message.slice(0, 160),
+        evt: 'model_fallback', modelId, next: models[i + 1], reason: (err as Error).message.slice(0, 160),
       }));
     }
   }
-  return client.send(new ConverseStreamCommand({ ...input, modelId: FALLBACK_MODEL }), { abortSignal: signal });
+  // Unreachable in practice (the last iteration always returns or throws), but keeps TS happy.
+  throw lastErr ?? new Error('No model available');
 }
 
 // Yields text delta chunks as strings; call this inside an SSE handler
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<string> {
   const { systemPrompt, history, userMessage, modelId = LLM_MODEL, onTokenUsage, signal } = options;
+  const chain = Array.isArray(modelId) ? modelId : [modelId];
 
   const messages = toConverseMessages(history, userMessage);
   if (!messages.length) return;
@@ -106,7 +133,7 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
     ? [{ text: systemPrompt }]
     : undefined;
 
-  const response = await openConverseStream(modelId, {
+  const { response } = await openConverseStream(chain, {
     messages,
     system,
     inferenceConfig: {
@@ -127,6 +154,25 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
         event.metadata.usage.outputTokens ?? 0,
       );
     }
+  }
+}
+
+/**
+ * Admin "Test" button: a minimal, real invoke of exactly this model id — no fallback, so a
+ * denial/error is reported as-is rather than being masked by the chain.
+ */
+export async function testModelInvoke(modelId: string): Promise<{ ok: boolean; latencyMs: number; sample?: string; error?: string }> {
+  const started = Date.now();
+  try {
+    const res = await client.send(new ConverseCommand({
+      modelId,
+      messages: [{ role: 'user', content: [{ text: 'Reply with just the word OK.' }] }],
+      inferenceConfig: { maxTokens: 10, temperature: 0 },
+    }));
+    const sample = (res.output?.message?.content ?? []).map((b) => b.text ?? '').join('').trim();
+    return { ok: true, latencyMs: Date.now() - started, sample };
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - started, error: (err as Error).message };
   }
 }
 

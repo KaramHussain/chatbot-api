@@ -56,6 +56,33 @@ console.log('Launcher columns ready.');
 await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_ui_style text DEFAULT 'fullscreen' NOT NULL`;
 console.log('Voice UI style column ready.');
 
+// Per-plan model chain (admin-editable): primary model tried first, then fallback_1, then
+// fallback_2 — e.g. Opus first, Mistral if Opus isn't entitled yet, Nova as a last resort.
+await client`CREATE TABLE IF NOT EXISTS plan_model_config (
+  plan_id text PRIMARY KEY,
+  primary_model text NOT NULL,
+  fallback_1 text,
+  fallback_2 text,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+)`;
+await client`
+  INSERT INTO plan_model_config (plan_id, primary_model, fallback_1, fallback_2) VALUES
+    ('starter', 'us.amazon.nova-2-lite-v1:0', NULL, NULL),
+    ('growth', 'us.anthropic.claude-opus-4-5-20251101-v1:0', 'mistral.mistral-large-3-675b-instruct', 'us.amazon.nova-2-lite-v1:0'),
+    ('enterprise', 'us.anthropic.claude-opus-4-5-20251101-v1:0', 'mistral.mistral-large-3-675b-instruct', 'us.amazon.nova-2-lite-v1:0')
+  ON CONFLICT (plan_id) DO NOTHING
+`;
+// One-time: a tenant's ai_model used to be stamped with its plan's static default at creation /
+// plan-change time, which would otherwise shadow the new dynamic plan config below for every
+// existing tenant. Clear it only where it still exactly matches one of those old static defaults —
+// a tenant an admin deliberately pointed at something else keeps that custom choice.
+await client`CREATE TABLE IF NOT EXISTS plan_model_migrations (name text PRIMARY KEY)`;
+const ranAiModelClear = await client`INSERT INTO plan_model_migrations (name) VALUES ('clear_inherited_ai_model_defaults') ON CONFLICT DO NOTHING RETURNING name`;
+if (ranAiModelClear.length) {
+  await client`UPDATE tenants SET ai_model = NULL WHERE ai_model IN ('us.amazon.nova-2-lite-v1:0', 'mistral.mistral-large-3-675b-instruct')`;
+}
+console.log('Plan model config ready.');
+
 // Plan models (Oct 31 2026): Free = Nova 2 Lite, Growth/Business = Mistral Large 3.
 // Tenants still on a previous plan default move to their plan's model; custom admin picks are kept.
 await client`ALTER TABLE tenants ALTER COLUMN ai_model SET DEFAULT 'us.amazon.nova-2-lite-v1:0'`;

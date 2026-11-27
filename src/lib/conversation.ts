@@ -4,6 +4,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, bots, conversations, messages, tenants } from '../db/index.js';
 import { buildRagPrompt, retrieveContext } from './rag.js';
+import { buildModelChain } from './planModels.js';
 import type { ChatSource } from '../types/index.js';
 
 export type Bot = typeof bots.$inferSelect;
@@ -15,6 +16,7 @@ export interface Turn {
 
 export interface TenantUsage {
   aiModel: string | null;
+  plan: string | null;
   monthlyTokenBudget: number;
   tokensUsedThisMonth: number;
 }
@@ -51,6 +53,7 @@ export async function getTenantUsage(tenantId: string): Promise<TenantUsage | un
   const [tenant] = await db
     .select({
       aiModel: tenants.aiModel,
+      plan: tenants.plan,
       monthlyTokenBudget: tenants.monthlyTokenBudget,
       tokensUsedThisMonth: tenants.tokensUsedThisMonth,
     })
@@ -65,9 +68,14 @@ export function isOverTokenBudget(tenant: TenantUsage | undefined): boolean {
   return !!tenant && tenant.monthlyTokenBudget > 0 && tenant.tokensUsedThisMonth >= tenant.monthlyTokenBudget;
 }
 
-/** The bot's own model wins, then the tenant's; undefined falls back to the Bedrock default. */
-export function resolveModelId(bot: Bot, tenant: TenantUsage | undefined): string | undefined {
-  return bot.llmModel ?? tenant?.aiModel ?? undefined;
+/**
+ * The ordered chain of models to try for this bot's next reply: the bot's own model (or the
+ * tenant's, if an admin deliberately set one) takes the first slot, followed by whatever fallback
+ * chain is configured for the tenant's plan (Settings → Admin → AI Models) — e.g. Opus first, then
+ * Mistral, then Nova, for Growth/Business. A tenant/bot with no override just gets the plan's chain.
+ */
+export function resolveModelChain(bot: Bot, tenant: TenantUsage | undefined): string[] {
+  return buildModelChain(tenant?.plan ?? 'starter', bot.llmModel ?? tenant?.aiModel ?? null);
 }
 
 /** Returns the given conversation id, or creates a new conversation for this bot. */

@@ -71,12 +71,14 @@ router.post('/plan', async (c) => {
 
   const config = PLAN_CONFIG[body.plan];
 
+  // aiModel is deliberately left untouched here: a null value means "follow this plan's
+  // admin-configured model chain dynamically" (see lib/planModels.ts) rather than being
+  // stamped with a static snapshot that would shadow future admin changes to that chain.
   await db.update(tenants)
     .set({
       plan: body.plan,
       monthlyMessageLimit: config.monthlyMessageLimit,
       monthlyTokenBudget: config.monthlyTokenBudget,
-      aiModel: config.aiModel,
       updatedAt: new Date(),
     })
     .where(eq(tenants.id, user.tenantId));

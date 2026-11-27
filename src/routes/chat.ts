@@ -24,7 +24,7 @@ import {
   loadRecentHistory,
   loadVisitorContext,
   resolveConversation,
-  resolveModelId,
+  resolveModelChain,
   saveMessage,
   searchKnowledge,
   toSourceRefs,
@@ -92,7 +92,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   const visitorTz = safeTimezone(body.timezone, safeTimezone(bookingSettings?.timezone));
 
   let systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });
-  const modelId = resolveModelId(bot, tenant);
+  const modelId = resolveModelChain(bot, tenant);
   const clientIp = (c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? '').split(',')[0].trim() || undefined;
 
   // Booking: the server performs the unambiguous steps itself (hold a tapped time, book on Confirm) before the

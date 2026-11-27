@@ -14,7 +14,7 @@ import {
   getTenantUsage,
   loadRecentHistory,
   loadVisitorContext,
-  resolveModelId,
+  resolveModelChain,
   searchKnowledge,
 } from '../lib/conversation.js';
 import { resolveVoice } from '../lib/deepgram.js';
@@ -52,7 +52,7 @@ export default defineAgent<ProcData>({
     ]);
 
     const brain: VoiceBrain = {
-      modelId: resolveModelId(bot, tenant),
+      modelId: resolveModelChain(bot, tenant),
       systemPromptFor: async (userText) =>
         buildSystemPrompt({ bot, sources: await searchKnowledge(bot, userText), visitorContext, voice: true }),
       onUsage: (inputTokens, outputTokens) => {

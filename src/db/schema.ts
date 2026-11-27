@@ -96,6 +96,18 @@ export const adminAuditLogs = pgTable('admin_audit_logs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => ({ tenantTimeIdx: index('admin_audit_tenant_time_idx').on(t.tenantId, t.createdAt) }));
 
+// ─── Plan model config ──────────────────────────────────────────────────────────
+// Admin-editable, per-plan model chain: primaryModel is tried first; fallback1/2 are
+// tried in order if the primary (or a fallback) comes back AccessDeniedException —
+// e.g. an Opus model whose Bedrock Marketplace subscription isn't active yet.
+export const planModelConfig = pgTable('plan_model_config', {
+  planId: text('plan_id').primaryKey(), // 'starter' | 'growth' | 'enterprise'
+  primaryModel: text('primary_model').notNull(),
+  fallback1: text('fallback_1'),
+  fallback2: text('fallback_2'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ─── Bots ──────────────────────────────────────────────────────────────────────
 // One tenant can have multiple bots (e.g. one per website section)
 export const bots = pgTable('bots', {

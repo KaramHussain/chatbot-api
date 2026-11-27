@@ -9,8 +9,8 @@ import { streamChat, type ChatMessage } from '../lib/bedrock.js';
 
 /** Bot-specific knowledge the LLM needs for each turn. */
 export interface VoiceBrain {
-  /** Bedrock model id (undefined → Bedrock default). */
-  readonly modelId?: string;
+  /** Bedrock model id, or an ordered fallback chain (undefined → Bedrock default). */
+  readonly modelId?: string | string[];
   /** System prompt for this turn — runs the knowledge search for `userText`. */
   systemPromptFor(userText: string): Promise<string>;
   /** Called once per completed Bedrock request with its token usage. */
@@ -41,7 +41,8 @@ export class BedrockRagLLM extends llm.LLM {
   }
 
   get model(): string {
-    return this.brain.modelId ?? 'bedrock-default';
+    const m = this.brain.modelId;
+    return (Array.isArray(m) ? m[0] : m) ?? 'bedrock-default';
   }
 
   get provider(): string {

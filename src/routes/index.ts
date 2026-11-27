@@ -5,6 +5,7 @@ import registerRouter from './register.js';
 import adminTenantsRouter from './admin/tenants.js';
 import adminAnalyticsRouter from './admin/analytics.js';
 import adminBotAvatarsRouter from './admin/bot-avatars.js';
+import adminAiModelsRouter from './admin/ai-models.js';
 import botsRouter from './bots.js';
 import documentsRouter from './documents.js';
 import chatRouter from './chat.js';
@@ -43,7 +44,8 @@ protected_
   .use('/admin/*', requireSuperAdmin)
   .route('/admin/tenants', adminTenantsRouter)
   .route('/admin/analytics', adminAnalyticsRouter)
-  .route('/admin/bot-avatars', adminBotAvatarsRouter);
+  .route('/admin/bot-avatars', adminBotAvatarsRouter)
+  .route('/admin/ai-models', adminAiModelsRouter);
 
 // Client-tenant routes (bots, documents, account)
 protected_

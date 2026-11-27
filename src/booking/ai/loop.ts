@@ -13,7 +13,8 @@ export interface LoopOptions {
   systemPrompt: string;
   history: ChatMessage[];
   userMessage: string;
-  modelId?: string;
+  /** A single model id, or an ordered fallback chain (tried in order on AccessDeniedException). */
+  modelId?: string | string[];
   tools: ToolSpec[];
   runTool: (name: string, input: Record<string, unknown>) => Promise<unknown>;
   maxRounds?: number;
@@ -40,21 +41,24 @@ function toolConfigFor(modelId: string, tools: ToolSpec[], forced?: string) {
 }
 
 export async function* streamWithTools(opts: LoopOptions): AsyncGenerator<LoopEvent> {
-  const modelId = opts.modelId ?? defaultLlmModel();
+  const chain = opts.modelId ? (Array.isArray(opts.modelId) ? opts.modelId : [opts.modelId]) : [defaultLlmModel()];
   const messages: Message[] = toConverseMessages(opts.history, opts.userMessage);
   if (!messages.length) return;
   const maxRounds = opts.maxRounds ?? 5;
 
   for (let round = 0; round < maxRounds; round++) {
     const forced = opts.forceTool?.(round);
-    const open = (force?: string) => openConverseStream(modelId, {
+    // toolConfigFor depends on which provider actually ends up serving the request (Mistral needs a
+    // different forced-tool shape than Nova/Claude) — so it's rebuilt per model as the chain falls
+    // through, not computed once against the (possibly unreachable) first model in the chain.
+    const open = (force?: string) => openConverseStream(chain, (modelId) => ({
       messages,
       system: [{ text: opts.systemPrompt }],
       toolConfig: toolConfigFor(modelId, opts.tools, force) as never,
       inferenceConfig: { maxTokens: 1024, temperature: 0.2 },
-    }, opts.signal);
+    }), opts.signal);
     // A model that rejects forced tool choice still works — it just chooses for itself.
-    const res = await open(forced).catch((err: Error) => { if (forced && err.name === 'ValidationException') return open(); throw err; });
+    const { response: res } = await open(forced).catch((err: Error) => { if (forced && err.name === 'ValidationException') return open(); throw err; });
     if (!res.stream) return;
 
     const blocks = new Map<number, Block | ToolBlock>();
