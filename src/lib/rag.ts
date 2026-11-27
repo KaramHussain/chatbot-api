@@ -120,7 +120,10 @@ export function buildRagPrompt(params: {
             const pageLabel = (s.metadata as any)?.page_title
               ? ` (${(s.metadata as any).page_title})`
               : '';
-            return `[Context ${i + 1}${pageLabel}]\n${s.chunkContent}`;
+            const pageUrl = s.metadata?.page_url;
+            const source = typeof pageUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(pageUrl)
+              ? `Source page: ${pageUrl}\n` : '';
+            return `[Context ${i + 1}${pageLabel}]\n${source}${s.chunkContent}`;
           })
           .join('\n\n')
       : 'No relevant documents found.';
