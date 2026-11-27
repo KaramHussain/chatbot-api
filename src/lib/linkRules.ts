@@ -59,15 +59,21 @@ function hostOf(url: string): string | null {
   }
 }
 
-/** Rewrites any recognized link in `text` to its configured target URL, in place. */
+/**
+ * Rewrites any recognized link in `text` to its configured target URL, in place. A markdown link
+ * keeps whatever label the model wrote (e.g. "[TEKCE Dubai Properties](...)"); a bare URL — which
+ * has no label to keep — is upgraded to a markdown link using the rule's own label (falling back
+ * to its domain), so the visitor sees a short readable name instead of a raw tracking URL.
+ */
 export function rewriteLinkRules(text: string, rules: LinkRule[]): string {
   if (!rules.length) return text;
-  const byDomain = new Map(rules.map((r) => [r.matchDomain, r.targetUrl]));
+  const byDomain = new Map(rules.map((r) => [r.matchDomain, r]));
   return text.replace(LINK_RE, (match, mdLabel, mdUrl) => {
     const url = mdUrl ?? match;
     const host = hostOf(url);
-    const targetUrl = host ? byDomain.get(host) : undefined;
-    if (!targetUrl) return match;
-    return mdLabel ? `[${mdLabel}](${targetUrl})` : targetUrl;
+    const rule = host ? byDomain.get(host) : undefined;
+    if (!rule) return match;
+    const label = mdLabel ?? rule.label ?? rule.matchDomain;
+    return `[${label}](${rule.targetUrl})`;
   });
 }
