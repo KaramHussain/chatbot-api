@@ -40,6 +40,7 @@ router.get('/:botId', async (c) => {
       headerNameColor: bots.headerNameColor,
       headerBg: bots.headerBg,
       voiceEnabled: bots.voiceEnabled,
+      windowSize: bots.windowSize,
       voiceUiStyle: bots.voiceUiStyle,
       voiceId: bots.voiceId,
       voiceIntro: bots.voiceIntro,

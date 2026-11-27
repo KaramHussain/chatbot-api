@@ -149,6 +149,7 @@ export const bots = pgTable('bots', {
   voiceEnabled: boolean('voice_enabled').default(false).notNull(),
   voiceId: text('voice_id').default('aura-2-thalia-en').notNull(), // Deepgram Aura-2 voice
   voiceIntro: text('voice_intro'), // what the orb says/greets when voice mode opens (null = default)
+  windowSize: text('window_size').default('standard').notNull(),
   voiceUiStyle: text('voice_ui_style').default('fullscreen').notNull(), // 'fullscreen' | 'inline'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

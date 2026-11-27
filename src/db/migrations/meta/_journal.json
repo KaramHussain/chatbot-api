@@ -50,6 +50,13 @@
       "when": 1795737600000,
       "tag": "0012_voice_ui_style",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795744800000,
+      "tag": "0013_window_size",
+      "breakpoints": true
     }
   ]
 }
