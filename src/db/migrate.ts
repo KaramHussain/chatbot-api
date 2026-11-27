@@ -51,6 +51,11 @@ await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS launcher_label text`;
 await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS launcher_gradient text DEFAULT 'aurora' NOT NULL`;
 console.log('Launcher columns ready.');
 
+// Voice UI style: 'fullscreen' (hands-free takeover, default) or 'inline' (stays
+// in the chat — small orb + animated input, replies land as normal messages).
+await client`ALTER TABLE bots ADD COLUMN IF NOT EXISTS voice_ui_style text DEFAULT 'fullscreen' NOT NULL`;
+console.log('Voice UI style column ready.');
+
 // Plan models (Oct 31 2026): Free = Nova 2 Lite, Growth/Business = Mistral Large 3.
 // Tenants still on a previous plan default move to their plan's model; custom admin picks are kept.
 await client`ALTER TABLE tenants ALTER COLUMN ai_model SET DEFAULT 'us.amazon.nova-2-lite-v1:0'`;
