@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
+import { jsonBody } from '../lib/validation.js';
 import { z } from 'zod';
-import { db, bots, botChunks, botDocuments, conversations, messages, tenants } from '../db/index.js';
+import { db, bots, botChunks, botDocuments, botLinkRules, conversations, messages, tenants, tenantThemes } from '../db/index.js';
+import { setBotLinkRules } from '../lib/linkRules.js';
 import { eq, and, count, desc, gte, lte, asc, sql } from 'drizzle-orm';
-import { putObject, buildLogoKey } from '../lib/s3.js';
+import { putObject, buildLogoKey, copyObject } from '../lib/s3.js';
 import sharp from 'sharp';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
 import { ttsSpeak } from '../lib/deepgram.js';
+import { isValidGradient } from '../config/gradients.js';
 const router = new Hono();
 // GET /api/bots — list bots for current tenant
 router.get('/', async (c) => {
@@ -45,12 +47,15 @@ const createBotSchema = z.object({
         .regex(/^[a-z0-9-]+$/),
     welcomeMessage: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-    systemPrompt: z.string().max(2000).nullable().optional(),
+    systemPrompt: z.string().max(10000).nullable().optional(),
     allowedOrigins: z.array(z.string().url()).default([]),
     leadCaptureEnabled: z.boolean().default(false),
     leadCaptureMessage: z.string().max(300).optional(),
     bookingEnabled: z.boolean().optional(),
     voiceEnabled: z.boolean().optional(),
+    windowSize: z.enum(['standard', 'wide', 'tall', 'large']).optional(),
+    voiceUiStyle: z.enum(['fullscreen', 'inline']).optional(),
+    linkStyle: z.enum(['plain', 'text-link', 'button']).optional(),
     voiceId: z.string().max(50).optional(),
     voiceIntro: z.string().max(300).nullable().optional(),
     status: z.enum(['active', 'inactive', 'draft']).optional(),
@@ -58,8 +63,12 @@ const createBotSchema = z.object({
     userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
     botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
     launcherSize: z.number().int().min(1).max(6).optional(),
-    widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+    widgetPosition: z.enum(['bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left']).optional(),
+    launcherStyle: z.enum(['classic', 'modern']).optional(),
+    launcherLabel: z.string().trim().max(40).nullable().optional(),
+    launcherGradient: z.string().refine(isValidGradient, 'Unknown gradient').optional(),
     launcherTransparent: z.boolean().optional(),
+    logoUrl: z.string().url().optional(),
     botAvatarUrl: z.string().url().nullable().optional(),
     responseStyle: z.enum(['balanced', 'concise', 'very_concise', 'detailed', 'bullet_points', 'professional', 'friendly']).optional(),
     displayName: z.string().max(100).nullable().optional(),
@@ -71,9 +80,15 @@ const createBotSchema = z.object({
     headerNameColor: z.string().nullable().optional(),
     headerBg: z.string().nullable().optional(),
 });
-router.post('/', zValidator('json', createBotSchema), async (c) => {
+router.post('/', jsonBody(createBotSchema), async (c) => {
     const tenantId = c.get('tenantId');
     const body = c.req.valid('json');
+    if (body.tenantThemeId) {
+        const [theme] = await db.select({ id: tenantThemes.id }).from(tenantThemes)
+            .where(and(eq(tenantThemes.id, body.tenantThemeId), eq(tenantThemes.tenantId, tenantId)));
+        if (!theme)
+            return c.json({ error: 'Theme not found in this account' }, 404);
+    }
     const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
     if (body.leadCaptureEnabled && !plan.leadCaptureAllowed) {
@@ -98,9 +113,79 @@ router.post('/', zValidator('json', createBotSchema), async (c) => {
         return c.json({ error: 'Slug already taken' }, 409);
     const [bot] = await db
         .insert(bots)
-        .values({ ...body, tenantId })
+        .values({ launcherStyle: 'modern', widgetPosition: 'bottom-center', ...body, tenantId })
         .returning();
     return c.json({ bot }, 201);
+});
+/**
+ * Copies a per-bot image (`.../api/logos/tenants/<tenant>/bots/<bot>/<file>`) to the new bot's own path and
+ * returns its new URL. Shared presets and external URLs are left as they are; a failed copy keeps the old URL.
+ */
+async function copyBotImage(url, tenantId, fromBotId, toBotId) {
+    const marker = '/api/logos/';
+    const at = url ? url.indexOf(marker) : -1;
+    if (!url || at < 0)
+        return url;
+    const key = url.slice(at + marker.length);
+    const prefix = `tenants/${tenantId}/bots/${fromBotId}/`;
+    if (!key.startsWith(prefix))
+        return url;
+    const newKey = `tenants/${tenantId}/bots/${toBotId}/${key.slice(prefix.length)}`;
+    try {
+        await copyObject(key, newKey);
+        return url.slice(0, at + marker.length) + newKey;
+    }
+    catch (err) {
+        console.error('duplicate: could not copy image', key, err.message);
+        return url;
+    }
+}
+// POST /api/bots/:id/duplicate — copy a bot's configuration under a new name.
+// Copies identity, appearance, behaviour, voice, lead capture and embed settings. Deliberately NOT copied:
+// knowledge (documents/chunks), conversations, and everything under Bookings.
+const duplicateBotSchema = z.object({ name: z.string().trim().min(1).max(100) });
+router.post('/:id/duplicate', jsonBody(duplicateBotSchema), async (c) => {
+    const tenantId = c.get('tenantId');
+    const { name } = c.req.valid('json');
+    const [source] = await db.select().from(bots).where(and(eq(bots.id, c.req.param('id')), eq(bots.tenantId, tenantId))).limit(1);
+    if (!source)
+        return c.json({ error: 'Bot not found' }, 404);
+    if (source.status === 'draft')
+        return c.json({ error: 'Finish setting up this bot before duplicating it.' }, 400);
+    // A unique URL slug within the tenant: "my-bot", then "my-bot-2", "my-bot-3"…
+    const taken = new Set((await db.select({ slug: bots.slug }).from(bots).where(eq(bots.tenantId, tenantId))).map((r) => r.slug));
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'bot';
+    let slug = base;
+    for (let i = 2; taken.has(slug); i++)
+        slug = `${base}-${i}`;
+    // The copy goes live only if the plan has room for another active bot; otherwise it starts inactive.
+    const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
+    const [{ total: active }] = await db.select({ total: count(bots.id) }).from(bots).where(and(eq(bots.tenantId, tenantId), eq(bots.status, 'active')));
+    const hasRoom = Number(active) < plan.maxBots;
+    const { id: _id, tenantId: _t, name: _n, slug: _s, status: _st, createdAt: _c, updatedAt: _u, bookingEnabled: _b, ...config } = source;
+    const newId = crypto.randomUUID();
+    // Independent from the original: colour profiles are shared by every bot using them, so the copy gets its
+    // OWN profile; and image files are stored per bot, so the copy gets its own files (replacing the original's
+    // logo later must not change the copy, and vice versa).
+    if (config.tenantThemeId) {
+        const [theme] = await db.select().from(tenantThemes).where(and(eq(tenantThemes.id, config.tenantThemeId), eq(tenantThemes.tenantId, tenantId))).limit(1);
+        if (theme) {
+            const { id: _tid, createdAt: _tc, updatedAt: _tu, name: themeName, ...palette } = theme;
+            const [cloned] = await db.insert(tenantThemes).values({ ...palette, name: `${themeName} (copy)`.slice(0, 100) }).returning({ id: tenantThemes.id });
+            config.tenantThemeId = cloned.id;
+        }
+        else {
+            config.tenantThemeId = null;
+        }
+    }
+    for (const field of ['logoUrl', 'botAvatarUrl', 'launcherLogoUrl']) {
+        config[field] = await copyBotImage(config[field], tenantId, source.id, newId);
+    }
+    const [bot] = await db.insert(bots).values({
+        ...config, id: newId, tenantId, name, slug, status: hasRoom ? 'active' : 'inactive', bookingEnabled: false,
+    }).returning();
+    return c.json({ bot, startedInactive: !hasRoom, maxBots: plan.maxBots, planLabel: plan.label }, 201);
 });
 // PUT /api/bots/:id — update bot settings / branding
 const updateBotSchema = z.object({
@@ -108,7 +193,7 @@ const updateBotSchema = z.object({
     displayName: z.string().max(100).nullable().optional(),
     welcomeMessage: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-    systemPrompt: z.string().max(2000).nullable().optional(),
+    systemPrompt: z.string().max(10000).nullable().optional(),
     allowedOrigins: z.array(z.string()).optional(),
     status: z.enum(['active', 'inactive', 'draft']).optional(),
     leadCaptureEnabled: z.boolean().optional(),
@@ -122,6 +207,9 @@ const updateBotSchema = z.object({
     })).optional(),
     bookingEnabled: z.boolean().optional(),
     voiceEnabled: z.boolean().optional(),
+    windowSize: z.enum(['standard', 'wide', 'tall', 'large']).optional(),
+    voiceUiStyle: z.enum(['fullscreen', 'inline']).optional(),
+    linkStyle: z.enum(['plain', 'text-link', 'button']).optional(),
     voiceId: z.string().max(50).optional(),
     voiceIntro: z.string().max(300).nullable().optional(),
     llmModel: z.string().optional(),
@@ -130,8 +218,12 @@ const updateBotSchema = z.object({
     userBubbleColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
     botBubbleBg: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullable().optional(),
     launcherSize: z.number().int().min(1).max(6).optional(),
-    widgetPosition: z.enum(['bottom-right', 'bottom-left', 'top-right', 'top-left']).optional(),
+    widgetPosition: z.enum(['bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left']).optional(),
+    launcherStyle: z.enum(['classic', 'modern']).optional(),
+    launcherLabel: z.string().trim().max(40).nullable().optional(),
+    launcherGradient: z.string().refine(isValidGradient, 'Unknown gradient').optional(),
     launcherTransparent: z.boolean().optional(),
+    logoUrl: z.string().url().optional(),
     botAvatarUrl: z.string().url().nullable().optional(),
     headerLogoBg: z.string().nullable().optional(),
     botAvatarBg: z.string().nullable().optional(),
@@ -141,10 +233,16 @@ const updateBotSchema = z.object({
     headerNameColor: z.string().nullable().optional(),
     headerBg: z.string().nullable().optional(),
 });
-router.put('/:id', zValidator('json', updateBotSchema), async (c) => {
+router.put('/:id', jsonBody(updateBotSchema), async (c) => {
     const tenantId = c.get('tenantId');
     const { id } = c.req.param();
     const body = c.req.valid('json');
+    if (body.tenantThemeId) {
+        const [theme] = await db.select({ id: tenantThemes.id }).from(tenantThemes)
+            .where(and(eq(tenantThemes.id, body.tenantThemeId), eq(tenantThemes.tenantId, tenantId)));
+        if (!theme)
+            return c.json({ error: 'Theme not found in this account' }, 404);
+    }
     if (body.leadCaptureEnabled || body.status === 'active') {
         const [tenant] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
         const plan = isPlanId(tenant?.plan) ? PLAN_CONFIG[tenant.plan] : PLAN_CONFIG.starter;
@@ -233,6 +331,36 @@ router.delete('/:id/knowledge', async (c) => {
     await db.delete(botChunks).where(and(eq(botChunks.botId, id), eq(botChunks.tenantId, tenantId)));
     await db.delete(botDocuments).where(and(eq(botDocuments.botId, id), eq(botDocuments.tenantId, tenantId)));
     return c.json({ success: true });
+});
+// GET /api/bots/:id/link-rules — domain → URL rewrite rules for this bot
+router.get('/:id/link-rules', async (c) => {
+    const tenantId = c.get('tenantId');
+    const { id } = c.req.param();
+    const [bot] = await db.select({ id: bots.id }).from(bots)
+        .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+    if (!bot)
+        return c.json({ error: 'Not found' }, 404);
+    const rows = await db.select().from(botLinkRules).where(eq(botLinkRules.botId, id)).orderBy(asc(botLinkRules.matchDomain));
+    return c.json({ rules: rows.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
+});
+// PUT /api/bots/:id/link-rules — replace the full rule set in one call
+const linkRulesSchema = z.object({
+    rules: z.array(z.object({
+        matchDomain: z.string().trim().min(1).max(255),
+        targetUrl: z.string().trim().url().max(2000),
+        label: z.string().trim().max(100).nullable().optional(),
+    })).max(500),
+});
+router.put('/:id/link-rules', jsonBody(linkRulesSchema), async (c) => {
+    const tenantId = c.get('tenantId');
+    const { id } = c.req.param();
+    const { rules } = c.req.valid('json');
+    const [bot] = await db.select({ id: bots.id }).from(bots)
+        .where(and(eq(bots.id, id), eq(bots.tenantId, tenantId))).limit(1);
+    if (!bot)
+        return c.json({ error: 'Not found' }, 404);
+    const saved = await setBotLinkRules(id, rules);
+    return c.json({ rules: saved.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
 });
 const VALID_IMAGE_TYPES = {
     'image/png': 'png',

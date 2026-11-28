@@ -30,7 +30,7 @@ export async function retrieveContext(params) {
       JOIN bot_documents bd ON bd.id = bc.document_id
       WHERE bc.bot_id = ${botId}
         AND bc.tenant_id = ${tenantId}
-        AND bd.status = 'ready'
+        AND (bd.status = 'ready' OR (bd.type = 'url' AND bd.status IN ('processing', 'failed')))
         AND (1 - (bc.embedding <=> ${embeddingStr}::vector)) >= ${MIN_VECTOR_SCORE}
       LIMIT 30
     ),
@@ -50,7 +50,7 @@ export async function retrieveContext(params) {
       JOIN bot_documents bd ON bd.id = bc.document_id
       WHERE bc.bot_id = ${botId}
         AND bc.tenant_id = ${tenantId}
-        AND bd.status = 'ready'
+        AND (bd.status = 'ready' OR (bd.type = 'url' AND bd.status IN ('processing', 'failed')))
         AND to_tsvector('english', bc.content) @@ websearch_to_tsquery('english', ${query})
       LIMIT 30
     ),
@@ -101,7 +101,10 @@ export function buildRagPrompt(params) {
             const pageLabel = s.metadata?.page_title
                 ? ` (${s.metadata.page_title})`
                 : '';
-            return `[Context ${i + 1}${pageLabel}]\n${s.chunkContent}`;
+            const pageUrl = s.metadata?.page_url;
+            const source = typeof pageUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(pageUrl)
+                ? `Source page: ${pageUrl}\n` : '';
+            return `[Context ${i + 1}${pageLabel}]\n${source}${s.chunkContent}`;
         })
             .join('\n\n')
         : 'No relevant documents found.';

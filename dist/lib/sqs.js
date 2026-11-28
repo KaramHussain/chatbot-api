@@ -8,7 +8,7 @@ export async function queueIngestionJob(job) {
         MessageBody: JSON.stringify(job),
         // Group by botId so jobs for the same bot are processed in order
         MessageGroupId: job.botId,
-        MessageDeduplicationId: job.documentId,
+        MessageDeduplicationId: job.jobId ?? job.documentId,
     }));
 }
 //# sourceMappingURL=sqs.js.map

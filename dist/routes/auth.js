@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { db, users, tenants, passwordResetTokens } from '../db/index.js';
-import { eq, and, gt } from 'drizzle-orm';
-import { signToken, authMiddleware } from '../middleware/auth.js';
+import { eq, and, gt, or } from 'drizzle-orm';
+import { signToken, authMiddleware, tenantIsActive } from '../middleware/auth.js';
 import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
 import bcrypt from 'bcryptjs';
@@ -60,7 +60,7 @@ function googleAuthResultPage(payload, targetOrigin) {
 const router = new Hono();
 // POST /api/auth/login
 const loginSchema = z.object({
-    email: z.string().email(),
+    email: z.string().trim().min(1).max(254),
     password: z.string().min(1),
 });
 router.post('/login', zValidator('json', loginSchema), async (c) => {
@@ -68,16 +68,19 @@ router.post('/login', zValidator('json', loginSchema), async (c) => {
     const [user] = await db
         .select()
         .from(users)
-        .where(eq(users.email, email.toLowerCase()))
+        .where(or(eq(users.email, email.toLowerCase()), eq(users.username, email.toLowerCase())))
         .limit(1);
     if (!user || !user.passwordHash) {
         // Prevent timing attacks — always run bcrypt even on missing user / Google-only account
         await bcrypt.compare(password, '$2b$10$invalidhashtopreventtimingattack');
-        return c.json({ error: 'Invalid email or password' }, 401);
+        return c.json({ error: 'Invalid email, username or password' }, 401);
     }
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
-        return c.json({ error: 'Invalid email or password' }, 401);
+        return c.json({ error: 'Invalid email, username or password' }, 401);
+    }
+    if (user.role !== 'super_admin' && !(await tenantIsActive(user.tenantId))) {
+        return c.json({ error: 'Your account is disabled. Please contact support.' }, 403);
     }
     const payload = {
         sub: user.id,
@@ -91,6 +94,7 @@ router.post('/login', zValidator('json', loginSchema), async (c) => {
         token,
         user: {
             id: user.id,
+            username: user.username,
             email: user.email,
             name: user.name,
             role: user.role,
@@ -143,6 +147,8 @@ router.get('/google/callback', async (c) => {
         if (!email || !emailVerified)
             return fail('email_not_verified');
         const { user, isNewAccount } = await upsertUserFromGoogle(email, googleName, googleId);
+        if (user.role !== 'super_admin' && !(await tenantIsActive(user.tenantId)))
+            return fail('account_disabled');
         const jwtPayload = {
             sub: user.id,
             email: user.email,

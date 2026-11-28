@@ -13,6 +13,7 @@ export interface JwtPayload {
     name: string;
 }
 export interface AuthUser {
+    username?: string | null;
     id: string;
     email: string;
     name: string;

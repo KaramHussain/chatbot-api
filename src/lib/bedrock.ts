@@ -75,6 +75,20 @@ export function toConverseMessages(history: ChatMessage[], userMessage: string):
 const DENIED_RETRY_MS = 5 * 60_000;
 const deniedUntil = new Map<string, number>();
 
+/**
+ * Whether to insert a Bedrock prompt-cache point after the system prompt for this model. Gated
+ * deliberately to the expensive Claude models (the only ones here that both support `cachePoint`
+ * AND are costly enough that caching the large static system prompt pays for itself): on a cache
+ * hit the cached prefix bills at ~10% of normal input. Cheap models (Nova) skip it — the savings
+ * would be pennies and a low-traffic bot would just eat the first-write premium. Mistral skips it
+ * too (no guaranteed cachePoint support). A sub-threshold prompt is below Bedrock's minimum
+ * cacheable size, so there's nothing to gain — skip to avoid a pointless write premium.
+ */
+const CACHE_MIN_PROMPT_CHARS = 4000; // ~1k tokens, above Claude's minimum cacheable prompt size
+function shouldCacheSystemPrompt(modelId: string, systemPrompt: string): boolean {
+  return /anthropic\.claude/i.test(modelId) && systemPrompt.length >= CACHE_MIN_PROMPT_CHARS;
+}
+
 export type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
 export interface ConverseStreamResult {
   response: ConverseStreamCommandOutput;
@@ -129,18 +143,25 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
   const messages = toConverseMessages(history, userMessage);
   if (!messages.length) return;
 
-  const system = systemPrompt
-    ? [{ text: systemPrompt }]
-    : undefined;
+  // The system block can depend on which model in the chain actually serves the request: only the
+  // expensive Claude models get a cache point appended (see shouldCacheSystemPrompt). The system
+  // prompt is static between edits, so the cached prefix is reused across turns and conversations.
+  const buildSystem = (id: string): ConverseStreamInput['system'] => {
+    if (!systemPrompt) return undefined;
+    if (shouldCacheSystemPrompt(id, systemPrompt)) {
+      return [{ text: systemPrompt }, { cachePoint: { type: 'default' } }];
+    }
+    return [{ text: systemPrompt }];
+  };
 
-  const { response } = await openConverseStream(chain, {
+  const { response } = await openConverseStream(chain, (id) => ({
     messages,
-    system,
+    system: buildSystem(id),
     inferenceConfig: {
       maxTokens: 2048,
       temperature: 0.2,
     },
-  }, signal);
+  }), signal);
 
   if (!response.stream) return;
 

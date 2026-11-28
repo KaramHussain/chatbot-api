@@ -4,6 +4,8 @@ export declare function getPresignedUploadUrl(params: {
     fileSizeLimit?: number;
 }): Promise<string>;
 export declare function getPresignedDownloadUrl(key: string): Promise<string>;
+/** Server-side copy inside the bucket (no download/upload). */
+export declare function copyObject(sourceKey: string, destKey: string): Promise<void>;
 export declare function deleteObject(key: string): Promise<void>;
 export declare function buildDocumentKey(params: {
     tenantId: string;

@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from '@aws-sdk/client-s3';
+import { S3Client, CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { awsConfig } from './aws.js';
 const s3 = new S3Client(awsConfig);
@@ -17,6 +17,10 @@ export async function getPresignedUploadUrl(params) {
 export async function getPresignedDownloadUrl(key) {
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
     return getSignedUrl(s3, command, { expiresIn: 3600 });
+}
+/** Server-side copy inside the bucket (no download/upload). */
+export async function copyObject(sourceKey, destKey) {
+    await s3.send(new CopyObjectCommand({ Bucket: BUCKET, Key: destKey, CopySource: encodeURIComponent(`${BUCKET}/${sourceKey}`) }));
 }
 export async function deleteObject(key) {
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));

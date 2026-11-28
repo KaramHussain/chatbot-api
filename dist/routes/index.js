@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import { authMiddleware, requireSuperAdmin, requireTenant } from '../middleware/auth.js';
+import { authMiddleware, requireSuperAdmin, requireTenant, auditAdminActions } from '../middleware/auth.js';
 import authRouter from './auth.js';
 import registerRouter from './register.js';
 import adminTenantsRouter from './admin/tenants.js';
 import adminAnalyticsRouter from './admin/analytics.js';
 import adminBotAvatarsRouter from './admin/bot-avatars.js';
+import adminAiModelsRouter from './admin/ai-models.js';
 import botsRouter from './bots.js';
 import documentsRouter from './documents.js';
 import chatRouter from './chat.js';
@@ -14,6 +15,10 @@ import voiceRouter from './voice.js';
 import accountRouter from './account.js';
 import logosRouter from './logos.js';
 import tenantThemesRouter from './tenant-themes.js';
+import bookingOwnerRouter from '../booking/routes/index.js';
+import bookingFeedRouter from '../booking/routes/feed.js';
+import bookingPublicRouter from '../booking/routes/public.js';
+import { requireBookingFeature } from '../booking/entitlements.js';
 const api = new Hono();
 // ─── Public routes ─────────────────────────────────────────────────────────────
 api.route('/auth', authRouter);
@@ -22,21 +27,29 @@ api.route('/widget-config', widgetRouter);
 api.route('/widget/voice', voiceRouter);
 api.route('/widget', widgetTtsRouter);
 api.route('/chat', chatRouter);
+api.route('/feeds/booking', bookingFeedRouter);
+api.route('/public/booking', bookingPublicRouter);
 api.route('/logos', logosRouter);
 // ─── Authenticated routes ──────────────────────────────────────────────────────
 const protected_ = new Hono();
 protected_.use('*', authMiddleware);
+protected_.use('*', auditAdminActions);
 // Super-admin only
 protected_
     .use('/admin/*', requireSuperAdmin)
     .route('/admin/tenants', adminTenantsRouter)
     .route('/admin/analytics', adminAnalyticsRouter)
-    .route('/admin/bot-avatars', adminBotAvatarsRouter);
+    .route('/admin/bot-avatars', adminBotAvatarsRouter)
+    .route('/admin/ai-models', adminAiModelsRouter);
 // Client-tenant routes (bots, documents, account)
 protected_
     .use('/bots/*', requireTenant)
     .use('/documents/*', requireTenant)
     .use('/themes/*', requireTenant)
+    .use('/account/*', requireTenant)
+    // Bookings (owner dashboard API) — gated by the plan/feature switch.
+    .use('/bots/:id/booking/*', requireBookingFeature)
+    .route('/bots/:id/booking', bookingOwnerRouter)
     .route('/bots', botsRouter)
     .route('/documents', documentsRouter)
     .route('/account', accountRouter)

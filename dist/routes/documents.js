@@ -2,10 +2,12 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { db, botDocuments, botChunks, bots, tenants } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { getPresignedUploadUrl, deleteObject, buildDocumentKey } from '../lib/s3.js';
 import { queueIngestionJob } from '../lib/sqs.js';
 import { v4 as uuidv4 } from 'uuid';
+import websitePagesRouter from './website-pages.js';
+import { websiteUrlSchema } from '../lib/website-url.js';
 const router = new Hono();
 // GET /api/documents?botId=... — list documents for a bot
 router.get('/', async (c) => {
@@ -24,9 +26,18 @@ router.get('/', async (c) => {
     const docs = await db
         .select()
         .from(botDocuments)
-        .where(and(eq(botDocuments.botId, botId), eq(botDocuments.tenantId, tenantId)));
-    return c.json({ documents: docs });
+        .where(and(eq(botDocuments.botId, botId), eq(botDocuments.tenantId, tenantId)))
+        .orderBy(desc(botDocuments.createdAt));
+    return c.json({ documents: docs.map(({ websiteData, chunkCount: _internalChunkCount, ...doc }) => ({
+            ...doc,
+            scrapedAt: websiteData.scrapedAt ?? null,
+            pageCount: websiteData.pages?.length ?? null,
+            failedPageCount: websiteData.pages?.filter(page => page.status === 'failed').length ?? 0,
+            needsScrape: websiteData.needsScrape ?? false,
+            activePageUrl: doc.status === 'processing' ? websiteData.activePageUrl ?? null : null,
+        })) });
 });
+router.route('/', websitePagesRouter);
 const GLOBAL_DEFAULT_MAX_MB = parseInt(process.env.MAX_UPLOAD_MB ?? '100', 10);
 // POST /api/documents/upload-url — Step 1: get presigned S3 URL
 const uploadUrlSchema = z.object({
@@ -122,8 +133,8 @@ router.post('/:id/confirm', async (c) => {
 // POST /api/documents/scrape-url — add a website URL as a knowledge source
 const scrapeUrlSchema = z.object({
     botId: z.string().uuid(),
-    url: z.string().url(),
-    name: z.string().max(200).optional(), // display name, defaults to the URL
+    url: websiteUrlSchema,
+    name: z.string().trim().min(1).max(200).optional(), // display name, defaults to the URL
     maxPages: z.number().int().min(1).max(1000).default(30),
 });
 router.post('/scrape-url', zValidator('json', scrapeUrlSchema), async (c) => {
@@ -139,6 +150,7 @@ router.post('/scrape-url', zValidator('json', scrapeUrlSchema), async (c) => {
         return c.json({ error: 'Bot not found' }, 404);
     const documentId = uuidv4();
     const displayName = body.name ?? new URL(body.url).hostname;
+    const jobId = uuidv4();
     await db.insert(botDocuments).values({
         id: documentId,
         botId: body.botId,
@@ -146,17 +158,19 @@ router.post('/scrape-url', zValidator('json', scrapeUrlSchema), async (c) => {
         name: displayName,
         type: 'url',
         sourceUrl: body.url,
+        websiteData: { maxPages: body.maxPages, jobId },
         status: 'processing',
     });
-    await queueIngestionJob({
-        documentId,
-        botId: body.botId,
-        tenantId,
-        documentType: 'url',
-        documentName: displayName,
-        sourceUrl: body.url,
-        maxPages: body.maxPages,
-    });
+    try {
+        await queueIngestionJob({
+            documentId, botId: body.botId, tenantId, documentType: 'url',
+            documentName: displayName, sourceUrl: body.url, maxPages: body.maxPages, jobId,
+        });
+    }
+    catch {
+        await db.update(botDocuments).set({ status: 'failed', errorMessage: 'We could not start scraping. Please try again.', updatedAt: new Date() }).where(eq(botDocuments.id, documentId));
+        return c.json({ error: 'We could not start scraping. Find the website below and choose Scrape Again.' }, 503);
+    }
     return c.json({ documentId, status: 'processing' }, 201);
 });
 // DELETE /api/documents/:id — delete document + all its chunks

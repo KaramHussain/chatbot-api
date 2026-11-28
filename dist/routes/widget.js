@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { db, bots, tenants, tenantThemes } from '../db/index.js';
+import { resolveLauncherColors } from '../config/gradients.js';
 import { eq, and } from 'drizzle-orm';
 const router = new Hono();
 // GET /api/widget-config/:botId — public, no auth
@@ -24,6 +25,9 @@ router.get('/:botId', async (c) => {
         botBubbleBg: bots.botBubbleBg,
         launcherSize: bots.launcherSize,
         widgetPosition: bots.widgetPosition,
+        launcherStyle: bots.launcherStyle,
+        launcherLabel: bots.launcherLabel,
+        launcherGradient: bots.launcherGradient,
         launcherTransparent: bots.launcherTransparent,
         headerLogoBg: bots.headerLogoBg,
         botAvatarBg: bots.botAvatarBg,
@@ -33,13 +37,16 @@ router.get('/:botId', async (c) => {
         headerNameColor: bots.headerNameColor,
         headerBg: bots.headerBg,
         voiceEnabled: bots.voiceEnabled,
+        windowSize: bots.windowSize,
+        voiceUiStyle: bots.voiceUiStyle,
+        linkStyle: bots.linkStyle,
         voiceId: bots.voiceId,
         voiceIntro: bots.voiceIntro,
         sessionDurationMinutes: tenants.sessionDurationMinutes,
     })
         .from(bots)
         .innerJoin(tenants, eq(bots.tenantId, tenants.id))
-        .where(and(eq(bots.id, botId), eq(bots.status, 'active')))
+        .where(and(eq(bots.id, botId), eq(bots.status, 'active'), eq(tenants.status, 'active')))
         .limit(1);
     if (!row)
         return c.json({ error: 'Bot not found' }, 404);
@@ -66,6 +73,8 @@ router.get('/:botId', async (c) => {
             });
         }
     }
+    // Concrete colours for the launcher (a 'brand' gradient follows the final primary colour, custom theme included).
+    Object.assign(config, { launcherColors: resolveLauncherColors(config.launcherGradient, config.primaryColor) });
     c.header('Cache-Control', 'no-store, max-age=0');
     return c.json({ config, sessionDurationMinutes });
 });

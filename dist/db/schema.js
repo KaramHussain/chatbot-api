@@ -38,12 +38,14 @@ export const tenants = pgTable('tenants', {
     monthlyMessageLimit: integer('monthly_message_limit').default(1000).notNull(),
     messagesThisMonth: integer('messages_this_month').default(0).notNull(),
     billingResetAt: timestamp('billing_reset_at'),
-    aiModel: text('ai_model').default('amazon.nova-pro-v1:0'),
+    aiModel: text('ai_model').default('us.amazon.nova-2-lite-v1:0'),
     monthlyTokenBudget: integer('monthly_token_budget').default(0).notNull(),
     tokensUsedThisMonth: integer('tokens_used_this_month').default(0).notNull(),
     tokenBudgetResetAt: timestamp('token_budget_reset_at'),
     sessionDurationMinutes: integer('session_duration_minutes').default(1440).notNull(),
     maxUploadMb: integer('max_upload_mb'),
+    // Per-tenant feature switches that override the plan default, e.g. { booking: true }
+    featureOverrides: jsonb('feature_overrides').$type().default({}).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -56,6 +58,7 @@ export const users = pgTable('users', {
     id: uuid('id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
+    username: text('username'),
     passwordHash: text('password_hash'), // null for Google-only accounts
     googleId: text('google_id'), // Google "sub" claim, set the first time this email logs in via Google
     name: text('name').notNull(),
@@ -64,7 +67,28 @@ export const users = pgTable('users', {
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
     emailIdx: uniqueIndex('users_email_idx').on(t.email),
+    usernameIdx: uniqueIndex('users_username_idx').on(t.username),
 }));
+// Deliberately no cascading foreign keys: retain attribution after account deletion.
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    actorId: uuid('actor_id').notNull(),
+    tenantId: uuid('tenant_id'),
+    action: text('action').notNull(),
+    resource: text('resource').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({ tenantTimeIdx: index('admin_audit_tenant_time_idx').on(t.tenantId, t.createdAt) }));
+// ─── Plan model config ──────────────────────────────────────────────────────────
+// Admin-editable, per-plan model chain: primaryModel is tried first; fallback1/2 are
+// tried in order if the primary (or a fallback) comes back AccessDeniedException —
+// e.g. an Opus model whose Bedrock Marketplace subscription isn't active yet.
+export const planModelConfig = pgTable('plan_model_config', {
+    planId: text('plan_id').primaryKey(), // 'starter' | 'growth' | 'enterprise'
+    primaryModel: text('primary_model').notNull(),
+    fallback1: text('fallback_1'),
+    fallback2: text('fallback_2'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
 // ─── Bots ──────────────────────────────────────────────────────────────────────
 // One tenant can have multiple bots (e.g. one per website section)
 export const bots = pgTable('bots', {
@@ -103,6 +127,10 @@ export const bots = pgTable('bots', {
     launcherSize: integer('launcher_size').default(3).notNull(),
     widgetPosition: text('widget_position').default('bottom-right'),
     launcherTransparent: boolean('launcher_transparent').default(false).notNull(),
+    // 'classic' = the original round button (existing bots keep it); 'modern' = Aurora bar (centre) / label pill (sides)
+    launcherStyle: text('launcher_style').default('classic').notNull(),
+    launcherLabel: text('launcher_label'), // bar placeholder / pill text (null = default)
+    launcherGradient: text('launcher_gradient').default('aurora').notNull(), // preset id | 'brand' | 'custom:#hex,#hex…'
     headerLogoBg: text('header_logo_bg'), // null=default white tint, 'transparent', or '#hex'
     botAvatarBg: text('bot_avatar_bg'), // null=primary color, 'transparent', or '#hex'
     launcherBg: text('launcher_bg'), // null=primary color, 'transparent', or '#hex'
@@ -114,6 +142,12 @@ export const bots = pgTable('bots', {
     voiceEnabled: boolean('voice_enabled').default(false).notNull(),
     voiceId: text('voice_id').default('aura-2-thalia-en').notNull(), // Deepgram Aura-2 voice
     voiceIntro: text('voice_intro'), // what the orb says/greets when voice mode opens (null = default)
+    windowSize: text('window_size').default('standard').notNull(),
+    voiceUiStyle: text('voice_ui_style').default('fullscreen').notNull(), // 'fullscreen' | 'inline'
+    // How links in chat replies are displayed: 'plain' (raw URL text), 'text-link' (underlined label,
+    // current default), or 'button' (rounded pill button) — text-chat rendering only, voice mode
+    // always speaks/shows bare URLs regardless of this setting.
+    linkStyle: text('link_style').default('text-link').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -130,6 +164,7 @@ export const botDocuments = pgTable('bot_documents', {
     type: documentTypeEnum('type').notNull(),
     s3Key: text('s3_key'), // for file uploads
     sourceUrl: text('source_url'), // for URL crawl
+    websiteData: jsonb('website_data').$type().default({}).notNull(),
     status: documentStatusEnum('status').default('pending').notNull(),
     chunkCount: integer('chunk_count').default(0).notNull(),
     errorMessage: text('error_message'),
@@ -140,6 +175,22 @@ export const botDocuments = pgTable('bot_documents', {
     botIdIdx: index('bot_documents_bot_id_idx').on(t.botId),
     tenantIdIdx: index('bot_documents_tenant_id_idx').on(t.tenantId),
     statusIdx: index('bot_documents_status_idx').on(t.status),
+}));
+// ─── Bot Link Rules ─────────────────────────────────────────────────────────────
+// Deterministic domain → URL rewrite applied to every bot reply server-side — never left to the
+// LLM to reproduce from memory. General-purpose: affiliate/referral codes, UTM-tagged tracking
+// links, a rebranded short-link domain, or redirecting a vendor's site to a completely different
+// URL. Per bot, opt-in — a bot with no rules behaves exactly as before.
+export const botLinkRules = pgTable('bot_link_rules', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+    matchDomain: text('match_domain').notNull(), // hostname to match (with or without 'www.'), e.g. 'resimpli.com'
+    targetUrl: text('target_url').notNull(), // URL to substitute in, in place of any matching link
+    label: text('label'), // optional display name for the admin UI, e.g. 'REsimpli'
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    botDomainIdx: uniqueIndex('bot_link_rules_bot_domain_idx').on(t.botId, t.matchDomain),
 }));
 // ─── Bot Chunks (Vector Store) ─────────────────────────────────────────────────
 // Each document is split into ~512-token chunks, each chunk has an embedding vector
@@ -168,6 +219,7 @@ export const conversations = pgTable('conversations', {
     visitorName: text('visitor_name'),
     visitorPhone: text('visitor_phone'),
     leadData: jsonb('lead_data').default({}).notNull(),
+    verifiedEmail: text('verified_email'), // set only by the booking OTP flow
     messageCount: integer('message_count').default(0).notNull(),
     startedAt: timestamp('started_at').defaultNow().notNull(),
     lastMessageAt: timestamp('last_message_at').defaultNow().notNull(),

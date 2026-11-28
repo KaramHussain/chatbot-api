@@ -1,9 +1,10 @@
-import { BedrockRuntimeClient, InvokeModelCommand, ConverseStreamCommand, } from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, InvokeModelCommand, ConverseCommand, ConverseStreamCommand, } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockAwsConfig } from './aws.js';
 const client = new BedrockRuntimeClient(bedrockAwsConfig);
-const LLM_MODEL = process.env.BEDROCK_LLM_MODEL ?? 'amazon.nova-lite-v1:0';
+const LLM_MODEL = process.env.BEDROCK_LLM_MODEL ?? 'us.amazon.nova-2-lite-v1:0';
 const EMBED_MODEL = process.env.BEDROCK_EMBEDDING_MODEL ?? 'amazon.titan-embed-text-v2:0';
 const EMBED_DIMS = parseInt(process.env.BEDROCK_EMBEDDING_DIMENSIONS ?? '1024');
+export const defaultLlmModel = () => LLM_MODEL;
 // ─── Embeddings ────────────────────────────────────────────────────────────────
 export async function embedText(text) {
     const response = await client.send(new InvokeModelCommand({
@@ -41,24 +42,84 @@ export function toConverseMessages(history, userMessage) {
     }
     return turns.map((m) => ({ role: m.role, content: [{ text: m.content }] }));
 }
+/** After a denial, skip the denied model for this long (avoids a wasted round-trip per message). */
+const DENIED_RETRY_MS = 5 * 60_000;
+const deniedUntil = new Map();
+/**
+ * Whether to insert a Bedrock prompt-cache point after the system prompt for this model. Gated
+ * deliberately to the expensive Claude models (the only ones here that both support `cachePoint`
+ * AND are costly enough that caching the large static system prompt pays for itself): on a cache
+ * hit the cached prefix bills at ~10% of normal input. Cheap models (Nova) skip it — the savings
+ * would be pennies and a low-traffic bot would just eat the first-write premium. Mistral skips it
+ * too (no guaranteed cachePoint support). A sub-threshold prompt is below Bedrock's minimum
+ * cacheable size, so there's nothing to gain — skip to avoid a pointless write premium.
+ */
+const CACHE_MIN_PROMPT_CHARS = 4000; // ~1k tokens, above Claude's minimum cacheable prompt size
+function shouldCacheSystemPrompt(modelId, systemPrompt) {
+    return /anthropic\.claude/i.test(modelId) && systemPrompt.length >= CACHE_MIN_PROMPT_CHARS;
+}
+/**
+ * Tries each model in `chain` in order (deduplicated by the caller) — e.g. [opus, mistral, nova].
+ * Falls through to the next one only on AccessDeniedException (a plan's model not entitled to this
+ * AWS account, e.g. a pending Bedrock Marketplace subscription) so a chat never fails outright
+ * because of model access; any other error (validation, throttling, etc.) is thrown immediately so
+ * it isn't silently masked as "model unavailable". `input` may depend on which model is actually
+ * being tried (e.g. forced-tool-use shape differs by provider) — pass a function for that.
+ */
+export async function openConverseStream(chain, input, signal) {
+    const buildInput = typeof input === 'function' ? input : () => input;
+    const models = chain.length ? chain : [LLM_MODEL];
+    let lastErr;
+    for (let i = 0; i < models.length; i++) {
+        const modelId = models[i];
+        const isLast = i === models.length - 1;
+        // Always give the last model in the chain a real attempt, even if it was recently denied —
+        // it's the end of the line, so there's nowhere else to fall back to.
+        if (!isLast && (deniedUntil.get(modelId) ?? 0) > Date.now())
+            continue;
+        try {
+            const response = await client.send(new ConverseStreamCommand({ ...buildInput(modelId), modelId }), { abortSignal: signal });
+            return { response, modelId };
+        }
+        catch (err) {
+            lastErr = err;
+            if (err.name !== 'AccessDeniedException' || isLast)
+                throw err;
+            deniedUntil.set(modelId, Date.now() + DENIED_RETRY_MS);
+            console.warn(JSON.stringify({
+                evt: 'model_fallback', modelId, next: models[i + 1], reason: err.message.slice(0, 160),
+            }));
+        }
+    }
+    // Unreachable in practice (the last iteration always returns or throws), but keeps TS happy.
+    throw lastErr ?? new Error('No model available');
+}
 // Yields text delta chunks as strings; call this inside an SSE handler
 export async function* streamChat(options) {
     const { systemPrompt, history, userMessage, modelId = LLM_MODEL, onTokenUsage, signal } = options;
+    const chain = Array.isArray(modelId) ? modelId : [modelId];
     const messages = toConverseMessages(history, userMessage);
     if (!messages.length)
         return;
-    const system = systemPrompt
-        ? [{ text: systemPrompt }]
-        : undefined;
-    const response = await client.send(new ConverseStreamCommand({
-        modelId,
+    // The system block can depend on which model in the chain actually serves the request: only the
+    // expensive Claude models get a cache point appended (see shouldCacheSystemPrompt). The system
+    // prompt is static between edits, so the cached prefix is reused across turns and conversations.
+    const buildSystem = (id) => {
+        if (!systemPrompt)
+            return undefined;
+        if (shouldCacheSystemPrompt(id, systemPrompt)) {
+            return [{ text: systemPrompt }, { cachePoint: { type: 'default' } }];
+        }
+        return [{ text: systemPrompt }];
+    };
+    const { response } = await openConverseStream(chain, (id) => ({
         messages,
-        system,
+        system: buildSystem(id),
         inferenceConfig: {
             maxTokens: 2048,
             temperature: 0.2,
         },
-    }), { abortSignal: signal });
+    }), signal);
     if (!response.stream)
         return;
     for await (const event of response.stream) {
@@ -69,5 +130,38 @@ export async function* streamChat(options) {
             onTokenUsage(event.metadata.usage.inputTokens ?? 0, event.metadata.usage.outputTokens ?? 0);
         }
     }
+}
+/**
+ * Admin "Test" button: a minimal, real invoke of exactly this model id — no fallback, so a
+ * denial/error is reported as-is rather than being masked by the chain.
+ */
+export async function testModelInvoke(modelId) {
+    const started = Date.now();
+    try {
+        const res = await client.send(new ConverseCommand({
+            modelId,
+            messages: [{ role: 'user', content: [{ text: 'Reply with just the word OK.' }] }],
+            inferenceConfig: { maxTokens: 10, temperature: 0 },
+        }));
+        const sample = (res.output?.message?.content ?? []).map((b) => b.text ?? '').join('').trim();
+        return { ok: true, latencyMs: Date.now() - started, sample };
+    }
+    catch (err) {
+        return { ok: false, latencyMs: Date.now() - started, error: err.message };
+    }
+}
+/**
+ * One-shot, non-streaming completion for background jobs (e.g. summarising a conversation).
+ * Uses the cheapest fast model by default; never use it on the live chat path.
+ */
+export async function completeText(opts) {
+    const res = await client.send(new ConverseCommand({
+        modelId: opts.modelId ?? 'us.amazon.nova-2-lite-v1:0',
+        system: [{ text: opts.system }],
+        messages: [{ role: 'user', content: [{ text: opts.user }] }],
+        inferenceConfig: { maxTokens: opts.maxTokens ?? 400, temperature: 0.1 },
+    }));
+    const text = (res.output?.message?.content ?? []).map((b) => b.text ?? '').join('').trim();
+    return { text, inputTokens: res.usage?.inputTokens ?? 0, outputTokens: res.usage?.outputTokens ?? 0 };
 }
 //# sourceMappingURL=bedrock.js.map

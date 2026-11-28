@@ -2,10 +2,11 @@ import { Hono } from 'hono';
 import { db, tenants, bots, botChunks, botDocuments, conversations } from '../db/index.js';
 import { eq, sql, and, gte, count, asc } from 'drizzle-orm';
 import { PLAN_CONFIG, isPlanId } from '../config/plans.js';
+import { entitlementsFor } from '../booking/entitlements.js';
 const router = new Hono();
 // DELETE /api/account/data — wipe RAG/conversation data, keep account
 router.delete('/data', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
     await db.delete(botChunks).where(eq(botChunks.tenantId, user.tenantId));
@@ -15,16 +16,25 @@ router.delete('/data', async (c) => {
 });
 // DELETE /api/account — delete own account + all associated data
 router.delete('/', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
+    if (user.role === 'client_user')
+        return c.json({ error: 'Only account owners can delete this account' }, 403);
     if (!user.tenantId)
         return c.json({ error: 'Only tenant admins can delete their account' }, 400);
     // Delete tenant → cascades to bots, documents, chunks, conversations, messages, users
     await db.delete(tenants).where(eq(tenants.id, user.tenantId));
     return c.json({ success: true });
 });
+// GET /api/account/entitlements — which gated features this tenant may use (drives dashboard visibility)
+router.get('/entitlements', async (c) => {
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
+    if (!user.tenantId)
+        return c.json({ error: 'No tenant' }, 400);
+    return c.json({ entitlements: await entitlementsFor(user.tenantId) });
+});
 // GET /api/account/settings — return tenant settings for this user
 router.get('/settings', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
     const [tenant] = await db.select({
@@ -44,19 +54,21 @@ router.get('/settings', async (c) => {
 });
 // POST /api/account/plan — switch subscription tier (no payment gateway yet: activates immediately)
 router.post('/plan', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
     const body = await c.req.json();
     if (!isPlanId(body.plan))
         return c.json({ error: 'Invalid plan' }, 400);
     const config = PLAN_CONFIG[body.plan];
+    // aiModel is deliberately left untouched here: a null value means "follow this plan's
+    // admin-configured model chain dynamically" (see lib/planModels.ts) rather than being
+    // stamped with a static snapshot that would shadow future admin changes to that chain.
     await db.update(tenants)
         .set({
         plan: body.plan,
         monthlyMessageLimit: config.monthlyMessageLimit,
         monthlyTokenBudget: config.monthlyTokenBudget,
-        aiModel: config.aiModel,
         updatedAt: new Date(),
     })
         .where(eq(tenants.id, user.tenantId));
@@ -80,7 +92,7 @@ router.post('/plan', async (c) => {
 });
 // PATCH /api/account/settings — tenant can update their own session duration
 router.patch('/settings', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
     const body = await c.req.json();
@@ -95,7 +107,7 @@ router.patch('/settings', async (c) => {
 });
 // GET /api/account/analytics — 30-day daily conversation + lead counts across all bots
 router.get('/analytics', async (c) => {
-    const user = c.get('user');
+    const user = { ...c.get('user'), tenantId: c.get('tenantId') };
     if (!user.tenantId)
         return c.json({ error: 'No tenant' }, 400);
     const since = new Date();
