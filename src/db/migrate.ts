@@ -100,4 +100,12 @@ await client`CREATE TABLE IF NOT EXISTS booking_migrations (name text PRIMARY KE
 const ranOfferMode = await client`INSERT INTO booking_migrations (name) VALUES ('offer_mode_request_default') ON CONFLICT DO NOTHING RETURNING name`;
 if (ranOfferMode.length) await client`UPDATE booking_settings SET offer_mode = 'request' WHERE offer_mode = 'intent'`;
 
+// Affiliate Directory (Nov 2026): enrich link rules with category and best-for so the server can
+// auto-inject a full routing table into the system prompt at request time. When a tenant has the
+// 'affiliateDirectory' feature flag set, the generated section replaces the hand-typed partner
+// list in their stored system prompt — single source of truth, one place to manage links.
+await client`ALTER TABLE bot_link_rules ADD COLUMN IF NOT EXISTS category text`;
+await client`ALTER TABLE bot_link_rules ADD COLUMN IF NOT EXISTS best_for text`;
+console.log('Affiliate directory columns ready.');
+
 await client.end();

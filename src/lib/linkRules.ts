@@ -15,6 +15,8 @@ export interface LinkRule {
   matchDomain: string;
   targetUrl: string;
   label: string | null;
+  category: string | null;
+  bestFor: string | null;
 }
 
 const cache = new Map<string, LinkRule[]>();
@@ -58,7 +60,14 @@ function normalizeDomain(domain: string): string {
 
 export async function refreshBotLinkRules(botId: string): Promise<LinkRule[]> {
   const rows = await db.select().from(botLinkRules).where(eq(botLinkRules.botId, botId));
-  const rules = rows.map((r) => ({ id: r.id, matchDomain: r.matchDomain, targetUrl: r.targetUrl, label: r.label }));
+  const rules = rows.map((r) => ({
+    id: r.id,
+    matchDomain: r.matchDomain,
+    targetUrl: r.targetUrl,
+    label: r.label,
+    category: r.category ?? null,
+    bestFor: r.bestFor ?? null,
+  }));
   cache.set(botId, rules);
   return rules;
 }
@@ -78,7 +87,9 @@ export async function getBotLinkRules(botId: string): Promise<LinkRule[]> {
  * hostname match — the common case, and the one that still catches a plain vendor domain the
  * model wrote instead of using the configured link.
  */
-function disambiguate(rules: { matchDomain: string; targetUrl: string; label?: string | null }[]): { matchDomain: string; targetUrl: string; label?: string | null }[] {
+type RuleInput = { matchDomain: string; targetUrl: string; label?: string | null; category?: string | null; bestFor?: string | null };
+
+function disambiguate(rules: RuleInput[]): RuleInput[] {
   const hostCounts = new Map<string, number>();
   for (const r of rules) {
     const host = parseKey(r.matchDomain)?.host;
@@ -92,15 +103,67 @@ function disambiguate(rules: { matchDomain: string; targetUrl: string; label?: s
   });
 }
 
-export async function setBotLinkRules(botId: string, rules: { matchDomain: string; targetUrl: string; label?: string | null }[]): Promise<LinkRule[]> {
+export async function setBotLinkRules(botId: string, rules: RuleInput[]): Promise<LinkRule[]> {
   const resolved = disambiguate(rules);
   await db.delete(botLinkRules).where(eq(botLinkRules.botId, botId));
   if (resolved.length) {
     await db.insert(botLinkRules).values(
-      resolved.map((r) => ({ botId, matchDomain: r.matchDomain, targetUrl: r.targetUrl, label: r.label ?? null })),
+      resolved.map((r) => ({
+        botId,
+        matchDomain: r.matchDomain,
+        targetUrl: r.targetUrl,
+        label: r.label ?? null,
+        category: r.category ?? null,
+        bestFor: r.bestFor ?? null,
+      })),
     );
   }
   return refreshBotLinkRules(botId);
+}
+
+/**
+ * Builds a "Partner directory" block from link rules that have category/bestFor enrichment.
+ * When a tenant has the `affiliateDirectory` feature flag enabled, the chat route appends this
+ * to the system prompt at request time — the stored system prompt then holds only the framing
+ * instructions (identity, recommendation logic, style, hard rules), and the directory is always
+ * in sync with the Links tab: add a partner there, it appears in the model's guidance instantly.
+ *
+ * Rules without category/bestFor are silently excluded — they still participate in the URL rewrite
+ * but don't appear in the directory (useful for technical alias rows like a short-link domain
+ * pointing to the same partner, e.g. the fxo.co paths).
+ */
+export function buildDirectorySection(rules: LinkRule[]): string {
+  // Only include rules that have at least a label and targetUrl
+  const entries = rules.filter((r) => r.label && r.targetUrl);
+  if (!entries.length) return '';
+
+  // Group by category; uncategorised entries appear under a generic heading
+  const byCategory = new Map<string, LinkRule[]>();
+  for (const rule of entries) {
+    const cat = rule.category?.trim() || 'Other';
+    const list = byCategory.get(cat) ?? [];
+    list.push(rule);
+    byCategory.set(cat, list);
+  }
+
+  const lines: string[] = [
+    '# Partner directory — the ONLY companies you may recommend',
+    '',
+    'Use the exact link shown for each partner. Never link to any company not in this list.',
+    '',
+  ];
+
+  for (const [cat, catRules] of byCategory) {
+    lines.push(`## ${cat}`);
+    for (const rule of catRules) {
+      const name = rule.label!;
+      const bestFor = rule.bestFor?.trim() ? `; best for ${rule.bestFor.trim()}` : '';
+      lines.push(`- ${name}${bestFor}. Link: ${rule.targetUrl}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
 }
 
 // Matches a markdown link `[label](url)` or a bare http(s)/www URL, same shape the widget itself

@@ -5,7 +5,7 @@ import { db, conversations, messages } from '../db/index.js';
 import { eq, asc } from 'drizzle-orm';
 import { streamSSE } from 'hono/streaming';
 import { streamChat } from '../lib/bedrock.js';
-import { getBotLinkRules, rewriteLinkRules } from '../lib/linkRules.js';
+import { getBotLinkRules, rewriteLinkRules, buildDirectorySection, type LinkRule } from '../lib/linkRules.js';
 import { Stopwatch } from '../lib/stopwatch.js';
 import { getSettings, isBookingReady } from '../booking/core.js';
 import { tenantHasBooking } from '../booking/entitlements.js';
@@ -60,9 +60,12 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   if (!isOriginAllowed(bot, origin)) return c.json({ error: 'Origin not allowed' }, 403);
 
   // Independent lookups run in parallel to keep time-to-first-token low.
-  const [tenant, ownsConversation] = await Promise.all([
+  // Link rules are fetched here (not after the stream) so they can be used for both
+  // directory injection into the system prompt and the post-stream URL rewrite.
+  const [tenant, ownsConversation, linkRules] = await Promise.all([
     getTenantUsage(bot.tenantId),
     body.conversationId ? conversationBelongsToBot(body.conversationId, bot.id) : Promise.resolve(false),
+    getBotLinkRules(bot.id),
   ]);
   if (isOverTokenBudget(tenant)) return c.json({ error: 'Monthly token budget exceeded' }, 429);
 
@@ -93,6 +96,16 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
   const visitorTz = safeTimezone(body.timezone, safeTimezone(bookingSettings?.timezone));
 
   let systemPrompt = buildSystemPrompt({ bot, sources, visitorContext, voice: !!body.voice });
+
+  // Affiliate Directory injection: when this tenant has the feature enabled, auto-append the
+  // partner routing table built from their link rules. This replaces the hand-typed partner list
+  // in the stored system prompt — the prompt then holds only framing instructions (identity,
+  // recommendation logic, style, hard rules) and the directory is always in sync with the
+  // Links tab. Adding/editing a partner in the dashboard immediately updates the directory.
+  if (!body.voice && tenant?.featureOverrides?.affiliateDirectory) {
+    const directorySection = buildDirectorySection(linkRules);
+    if (directorySection) systemPrompt += '\n\n' + directorySection;
+  }
   const modelId = resolveModelChain(bot, tenant);
   const clientIp = (c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? '').split(',')[0].trim() || undefined;
 
@@ -160,7 +173,7 @@ router.post('/', zValidator('json', chatSchema), async (c) => {
       // Swap any link matching this bot's configured rules for its target URL — deterministic,
       // so correctness never depends on the model reproducing a long tracking URL from memory,
       // or on retrieval happening to surface the right knowledge-base chunk.
-      const linkRules = await getBotLinkRules(bot.id);
+      // linkRules was already fetched in the parallel setup block above — no extra DB call.
       fullResponse = rewriteLinkRules(fullResponse, linkRules);
 
       // Tell the widget we're done first (with the rewritten text + sources for the citation UI), then persist.

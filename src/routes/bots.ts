@@ -370,7 +370,7 @@ router.get('/:id/link-rules', async (c) => {
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
   const rows = await db.select().from(botLinkRules).where(eq(botLinkRules.botId, id)).orderBy(asc(botLinkRules.matchDomain));
-  return c.json({ rules: rows.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
+  return c.json({ rules: rows.map(({ id, matchDomain, targetUrl, label, category, bestFor }) => ({ id, matchDomain, targetUrl, label, category, bestFor })) });
 });
 
 // PUT /api/bots/:id/link-rules — replace the full rule set in one call
@@ -379,6 +379,8 @@ const linkRulesSchema = z.object({
     matchDomain: z.string().trim().min(1).max(255),
     targetUrl: z.string().trim().url().max(2000),
     label: z.string().trim().max(100).nullable().optional(),
+    category: z.string().trim().max(100).nullable().optional(),
+    bestFor: z.string().trim().max(300).nullable().optional(),
   })).max(500),
 });
 router.put('/:id/link-rules', jsonBody(linkRulesSchema), async (c) => {
@@ -391,7 +393,7 @@ router.put('/:id/link-rules', jsonBody(linkRulesSchema), async (c) => {
   if (!bot) return c.json({ error: 'Not found' }, 404);
 
   const saved = await setBotLinkRules(id, rules);
-  return c.json({ rules: saved.map(({ id, matchDomain, targetUrl, label }) => ({ id, matchDomain, targetUrl, label })) });
+  return c.json({ rules: saved.map(({ id, matchDomain, targetUrl, label, category, bestFor }) => ({ id, matchDomain, targetUrl, label, category, bestFor })) });
 });
 
 const VALID_IMAGE_TYPES: Record<string, string> = {

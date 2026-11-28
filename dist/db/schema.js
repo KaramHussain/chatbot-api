@@ -186,7 +186,10 @@ export const botLinkRules = pgTable('bot_link_rules', {
     botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
     matchDomain: text('match_domain').notNull(), // hostname to match (with or without 'www.'), e.g. 'resimpli.com'
     targetUrl: text('target_url').notNull(), // URL to substitute in, in place of any matching link
-    label: text('label'), // optional display name for the admin UI, e.g. 'REsimpli'
+    label: text('label'), // optional display name for the admin UI and directory, e.g. 'REsimpli'
+    // Affiliate Directory enrichment: set these to enable per-tenant auto-injected routing tables.
+    category: text('category'), // grouping label, e.g. 'Property Management & Accounting'
+    bestFor: text('best_for'), // one-liner about ideal use case, e.g. 'landlords with mixed portfolios'
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

@@ -19,6 +19,7 @@ export interface TenantUsage {
   plan: string | null;
   monthlyTokenBudget: number;
   tokensUsedThisMonth: number;
+  featureOverrides: Record<string, boolean>;
 }
 
 /** Appended to the system prompt when the user is talking (not typing) to the bot. */
@@ -56,11 +57,12 @@ export async function getTenantUsage(tenantId: string): Promise<TenantUsage | un
       plan: tenants.plan,
       monthlyTokenBudget: tenants.monthlyTokenBudget,
       tokensUsedThisMonth: tenants.tokensUsedThisMonth,
+      featureOverrides: tenants.featureOverrides,
     })
     .from(tenants)
     .where(eq(tenants.id, tenantId))
     .limit(1);
-  return tenant;
+  return tenant ? { ...tenant, featureOverrides: (tenant.featureOverrides as Record<string, boolean>) ?? {} } : undefined;
 }
 
 /** A budget of 0 means unlimited. */
