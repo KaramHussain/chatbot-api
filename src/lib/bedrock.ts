@@ -76,17 +76,20 @@ const DENIED_RETRY_MS = 5 * 60_000;
 const deniedUntil = new Map<string, number>();
 
 /**
- * Whether to insert a Bedrock prompt-cache point after the system prompt for this model. Gated
- * deliberately to the expensive Claude models (the only ones here that both support `cachePoint`
- * AND are costly enough that caching the large static system prompt pays for itself): on a cache
- * hit the cached prefix bills at ~10% of normal input. Cheap models (Nova) skip it — the savings
- * would be pennies and a low-traffic bot would just eat the first-write premium. Mistral skips it
- * too (no guaranteed cachePoint support). A sub-threshold prompt is below Bedrock's minimum
- * cacheable size, so there's nothing to gain — skip to avoid a pointless write premium.
+ * Whether to insert a Bedrock prompt-cache point after the system prompt for this model. Gated to
+ * the expensive Claude models — the only ones here that both support `cachePoint` AND are costly
+ * enough that caching the large static system prompt pays for itself (on a hit the cached prefix
+ * bills at ~10% of normal input). Cheap Nova and non-caching Mistral are left untouched.
+ *
+ * We deliberately do NOT gate on prompt size. Measured against Opus 4.5 on Bedrock, the minimum
+ * cacheable prefix is 4,096 tokens: below it the cache point is a silent no-op (0 cache
+ * write/read, input billed normally — no premium), at/above it the prefix caches automatically.
+ * So adding the point unconditionally costs nothing while the prompt is short and switches the
+ * saving on by itself once the prompt grows past the minimum (e.g. an injected directory). The
+ * system prompt is static between edits, so the cached prefix is reused across turns and chats.
  */
-const CACHE_MIN_PROMPT_CHARS = 4000; // ~1k tokens, above Claude's minimum cacheable prompt size
-function shouldCacheSystemPrompt(modelId: string, systemPrompt: string): boolean {
-  return /anthropic\.claude/i.test(modelId) && systemPrompt.length >= CACHE_MIN_PROMPT_CHARS;
+function shouldCacheSystemPrompt(modelId: string): boolean {
+  return /anthropic\.claude/i.test(modelId);
 }
 
 export type ConverseStreamInput = Omit<ConstructorParameters<typeof ConverseStreamCommand>[0], 'modelId'>;
@@ -148,7 +151,7 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
   // prompt is static between edits, so the cached prefix is reused across turns and conversations.
   const buildSystem = (id: string): ConverseStreamInput['system'] => {
     if (!systemPrompt) return undefined;
-    if (shouldCacheSystemPrompt(id, systemPrompt)) {
+    if (shouldCacheSystemPrompt(id)) {
       return [{ text: systemPrompt }, { cachePoint: { type: 'default' } }];
     }
     return [{ text: systemPrompt }];
