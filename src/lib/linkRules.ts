@@ -19,13 +19,32 @@ export interface LinkRule {
 
 const cache = new Map<string, LinkRule[]>();
 
-/** Splits a domain or full URL into its hostname and path (no scheme/query/trailing slash). */
+// Two-label country-code suffixes where the registrable domain needs 3 labels, not 2 (e.g.
+// "propertydata.co.uk", not "co.uk"). Not exhaustive — just the common ones likely to show up.
+const SPECIAL_SECOND_LEVEL_DOMAINS = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'co.in', 'co.nz', 'co.za', 'com.au', 'net.au', 'org.au', 'co.jp',
+]);
+
+/**
+ * The registrable domain a hostname belongs to — "app.financelobby.com" and "financelobby.com"
+ * are the same registrable domain, so a rule entered against one matches a link written against
+ * the other (the model is inconsistent about which subdomain it mentions).
+ */
+function registrableDomain(host: string): string {
+  const parts = host.split('.');
+  if (parts.length <= 2) return host;
+  const lastTwo = parts.slice(-2).join('.');
+  if (parts.length >= 3 && SPECIAL_SECOND_LEVEL_DOMAINS.has(lastTwo)) return parts.slice(-3).join('.');
+  return lastTwo;
+}
+
+/** Splits a domain or full URL into its registrable domain and path (no scheme/query/trailing slash). */
 function parseKey(input: string): { host: string; path: string } | null {
   try {
     const trimmed = input.trim();
     const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
     const u = new URL(withScheme);
-    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    const host = registrableDomain(u.hostname.toLowerCase().replace(/^www\./, ''));
     const path = u.pathname.replace(/\/+$/, '');
     return { host, path: path === '/' ? '' : path };
   } catch {
